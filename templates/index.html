@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карта с панорамами</title>
+
+<!-- Leaflet (OpenStreetMap) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- Pannellum: 360°-вьювер для собранных панорам (JPG отдаёт наш Flask-бэкенд) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css" />
+<script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div id="app" data-is-admin="{{ 'true' if is_admin else 'false' }}">
+
+  <header class="topbar">
+    <h1>Точки с панорамами</h1>
+
+    <div class="admin-controls">
+      <span id="admin-status" class="admin-status {{ 'on' if is_admin else '' }}">
+        {{ 'Режим администратора включён' if is_admin else 'Режим просмотра' }}
+      </span>
+
+      {% if is_admin %}
+        <button id="btn-add-mode" class="btn btn-primary">Добавить точку</button>
+        <button id="btn-logout" class="btn btn-ghost">Выйти из админки</button>
+      {% else %}
+        <button id="btn-login" class="btn btn-ghost">Вход для администратора</button>
+      {% endif %}
+    </div>
+  </header>
+
+  <div id="map"></div>
+
+  <!-- Модалка входа админа -->
+  <div id="login-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Вход администратора</h2>
+      <input id="login-password" type="password" placeholder="Пароль">
+      <div class="modal-actions">
+        <button id="login-submit" class="btn btn-primary">Войти</button>
+        <button class="btn btn-ghost js-close-modal">Отмена</button>
+      </div>
+      <p id="login-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <!-- Модалка добавления точки (только админ) -->
+  <div id="add-point-modal" class="modal hidden">
+    <div class="modal-card wide">
+      <h2>Новая точка</h2>
+      <p class="hint">Координаты: <span id="add-point-coords"></span></p>
+
+      <label>Название</label>
+      <input id="add-point-title" type="text" placeholder="Например: Смотровая площадка">
+
+      <label>Описание (необязательно)</label>
+      <textarea id="add-point-description" rows="2" placeholder="Комментарий для посетителей"></textarea>
+
+      <div id="panorama-preview" class="panorama-box"></div>
+      <p id="panorama-status" class="hint"></p>
+
+      <div class="modal-actions">
+        <button id="add-point-submit" class="btn btn-primary">Сохранить точку</button>
+        <button class="btn btn-ghost js-close-modal">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Модалка просмотра панорамы существующей точки -->
+  <div id="view-point-modal" class="modal hidden">
+    <div class="modal-card wide">
+      <h2 id="view-point-title"></h2>
+      <p id="view-point-description" class="hint"></p>
+      <div id="view-panorama" class="panorama-box"></div>
+      <p id="view-panorama-status" class="hint"></p>
+      <div class="modal-actions">
+        {% if is_admin %}
+          <button id="view-point-delete" class="btn btn-danger">Удалить точку</button>
+        {% endif %}
+        <button class="btn btn-ghost js-close-modal">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+</body>
+</html>
