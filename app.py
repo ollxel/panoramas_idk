@@ -427,16 +427,60 @@ def get_panorama():
     except Exception as exc:
         return jsonify({"status": "error", "message": str(exc)}), 502
 
-    cache_file = _cache_path(meta["image_id"], zoom)
+    max_width = 8192
+    if zoom < len(meta["zooms"]):
+        width = meta["zooms"][zoom]["width"]
+        while width > max_width and zoom + 1 < len(meta["zooms"]):
+            zoom += 1
+            width = meta["zooms"][zoom]["width"]
+
+    if zoom != int(request.args.get("zoom", default=DEFAULT_PANO_ZOOM)):
+        cache_file = _cache_path(meta["image_id"], zoom)
+    else:
+        cache_file = _cache_path(meta["image_id"], zoom)
     rel_url = f"/static/panoramas/{os.path.basename(cache_file)}"
 
-    if not os.path.exists(cache_file):
+    # Надёжность кэша: некоторые JPG могут быть битые (тогда Pannellum/WebGL падает).
+    # Поэтому, если файл есть — проверяем валидность. Если битый — пересобираем.
+    def _is_valid_jpg(path: str) -> bool:
         try:
-            download_panorama(lat, lon, cache_file, zoom=zoom, layer="sta", pano_id=pano_id or None)
+            from PIL import Image
+
+            im = Image.open(path)
+            im.verify()  # не декодирует полностью, но проверяет целостность
+            return True
+        except Exception:
+            return False
+
+    need_download = not os.path.exists(cache_file) or not _is_valid_jpg(cache_file)
+
+    # Опция: принудительная пересборка, если клиент просит ?force=1
+    force = str(request.args.get("force", "")).lower() in {"1", "true", "yes"}
+    if force:
+        need_download = True
+
+    if need_download:
+        try:
+            # Если был битый файл — удалим, чтобы не было шансов отдать его снова.
+            if os.path.exists(cache_file):
+                try:
+                    os.remove(cache_file)
+                except Exception:
+                    pass
+
+            download_panorama(
+                lat,
+                lon,
+                cache_file,
+                zoom=zoom,
+                layer="sta",
+                pano_id=pano_id or None,
+            )
         except PanoramaNotFound:
             return jsonify({"status": "not_found"})
         except Exception as exc:
             return jsonify({"status": "error", "message": str(exc)}), 502
+
 
     pano_point = meta.get("pano_point") or {}
     return jsonify(

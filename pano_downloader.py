@@ -256,14 +256,23 @@ def fetch_airship_ids_for_bbox(
     }
 
 
-async def _fetch_tile(session, url: str) -> Optional[Image.Image]:
-    try:
-        async with session.get(url) as response:
-            response.raise_for_status()
-            content = await response.read()
-            return Image.open(BytesIO(content))
-    except Exception:
-        return None
+async def _fetch_tile(session, url: str, semaphore: asyncio.Semaphore, retries: int = 2) -> Image.Image:
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            async with semaphore:
+                async with session.get(url, timeout=10) as response:
+                    response.raise_for_status()
+                    content = await response.read()
+                    tile = Image.open(BytesIO(content))
+                    tile.load()
+                    return tile
+        except Exception as exc:
+            last_error = exc
+            if attempt == retries:
+                break
+            await asyncio.sleep(0.2)
+    raise RuntimeError(f"Failed to download tile {url}: {last_error}")
 
 
 async def _assemble_panorama(
@@ -284,13 +293,20 @@ async def _assemble_panorama(
         pano_height = int(pano_width / 2)
 
     pano = Image.new("RGB", (pano_width, pano_height))
+    semaphore = asyncio.Semaphore(8)
+    connector = aiohttp.TCPConnector(limit=16, limit_per_host=16)
+    timeout = aiohttp.ClientTimeout(total=20)
 
-    async with aiohttp.ClientSession(headers=HEADERS) as session:
+    async with aiohttp.ClientSession(
+        headers=HEADERS,
+        connector=connector,
+        timeout=timeout,
+    ) as session:
         tasks = []
         for x in range(x_range):
             for y in range(y_range):
                 url = TILE_URL.format(image_id=image_id, zoom=zoom, x=x, y=y)
-                tasks.append(_fetch_tile(session, url))
+                tasks.append(_fetch_tile(session, url, semaphore))
         results = await asyncio.gather(*tasks)
 
     idx = 0
@@ -298,8 +314,11 @@ async def _assemble_panorama(
         for y in range(y_range):
             tile = results[idx]
             idx += 1
-            if tile:
-                pano.paste(tile, (x * tile_width, y * tile_height))
+            if tile is None:
+                raise RuntimeError(
+                    f"Panorama assembly failed: missing tile at x={x}, y={y}, image_id={image_id}, zoom={zoom}"
+                )
+            pano.paste(tile, (x * tile_width, y * tile_height))
 
     return pano
 

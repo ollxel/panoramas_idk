@@ -113,19 +113,19 @@ html, body {
   z-index: 2000;
 }
 
-.modal.hidden { display: none; }
+.modal.hidden { display: none; pointer-events: none; opacity: 0; }
 
 .modal-card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px;
-  width: 340px;
+  width: 680px;
   max-width: calc(100vw - 32px);
 }
 
 .modal-card.wide {
-  width: 560px;
+  width: 980px;
 }
 
 .modal-card h2 {
@@ -146,11 +146,13 @@ html, body {
 
 .view-right {
   width: 240px;
+  flex: 0 0 240px;
   background: rgba(0, 0, 0, 0.08);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
 }
+
 
 .view-right h3 {
   margin: 0 0 10px 0;
@@ -159,10 +161,22 @@ html, body {
 }
 
 .poi-summary {
-  max-height: 360px;
+  width: 100%;
+  height: 100%;
+  max-height: 520px;
   overflow: auto;
   padding-right: 6px;
 }
+
+
+.poi-item a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.poi-item a:hover {
+  text-decoration: underline;
+}
+
 
 /* Сводка по категориям */
 .poi-category {
@@ -251,13 +265,63 @@ html, body {
 .panorama-box {
   position: relative;
   width: 100%;
-  height: 320px;
+  height: 520px;
   margin-top: 10px;
   border-radius: 8px;
   overflow: hidden;
   background: #05060a;
   border: 1px solid var(--border);
 }
+
+/* Экран загрузки панорамы: временно отключен, чтобы не перекрывал страницу/карту */
+#view-panorama-loading { display: none !important; }
+
+
+
+/* Увеличиваем модальное окно примерно в 2 раза */
+.modal-card.wide {
+  width: 980px;
+  max-width: calc(100vw - 32px);
+}
+
+/* Экран загрузки панорамы перекрывает весь блок (и отвлекает от "прошлого") */
+#view-panorama-loading {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 17, 21, 0.97);
+  z-index: 100;
+  border-radius: 8px;
+}
+
+/* чтобы абсолютное позиционирование работало */
+#view-panorama {
+  position: relative;
+}
+
+.btn-lang {
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.lang-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Увеличиваем окно целиком */
+.modal-card.wide {
+  width: 980px;
+  max-width: calc(100vw - 32px);
+}
+
+
 
 /* Leaflet popup theming (лёгкая адаптация под тёмную тему) */
 .leaflet-popup-content-wrapper {

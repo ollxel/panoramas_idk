@@ -5,11 +5,121 @@
   const isAdmin = appEl.dataset.isAdmin === "true";
 
   // ------------------------------------------------------------------
+  // Язык UI (по умолчанию русский)
+  // ------------------------------------------------------------------
+  const LANG = {
+
+    ru: {
+      appTitle: "Точки с панорамами",
+      adminLogin: "Вход для администратора",
+      btnAddPoint: "Добавить точку",
+      btnClose: "Закрыть",
+      loadingPanorama: "Загрузка панорамы…",
+    },
+    en: {
+      appTitle: "Panorama Points",
+      adminLogin: "Admin login",
+      btnAddPoint: "Add point",
+      btnClose: "Close",
+      loadingPanorama: "Loading panorama…",
+    },
+  };
+
+  const langRuBtn = document.getElementById("btn-lang-ru");
+  const langEnBtn = document.getElementById("btn-lang-en");
+  let currentLang = (localStorage.getItem("lang") || "ru").toLowerCase();
+  if (currentLang !== "en" && currentLang !== "ru") currentLang = "ru";
+
+  function getI18n(key) {
+    const t = LANG[currentLang];
+    switch (key) {
+      case "currentLocation":
+        return currentLang === "en" ? "Current location" : "Текущее местоположение";
+      case "close":
+        return t.btnClose;
+      case "deletePoint":
+        return currentLang === "en" ? "Delete point" : "Удалить точку";
+      case "appTitle":
+        return t.appTitle;
+      case "adminLoginTitle":
+        return currentLang === "en" ? "Admin login" : "Вход администратора";
+      case "login":
+        return currentLang === "en" ? "Login" : "Войти";
+      case "cancel":
+        return currentLang === "en" ? "Cancel" : "Отмена";
+      default:
+        return "";
+    }
+  }
+
+
+  function setLang(lang) {
+
+    currentLang = lang === "en" ? "en" : "ru";
+    // переводим все элементы с data-i18n до вычислений/рендеров
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const key = el.getAttribute("data-i18n");
+      const value = getI18n(key);
+      if (value) el.textContent = value;
+    });
+
+    localStorage.setItem("lang", currentLang);
+
+    if (langRuBtn) langRuBtn.classList.toggle("active", currentLang === "ru");
+    if (langEnBtn) langEnBtn.classList.toggle("active", currentLang === "en");
+
+    const t = LANG[currentLang];
+
+    const adminStatusEl = document.getElementById("admin-status");
+    if (adminStatusEl) {
+      // В RU шаблон уже содержит текст. В EN — заменяем.
+      if (currentLang === "en") {
+        const isAdminNow = appEl.dataset.isAdmin === "true";
+        adminStatusEl.textContent = isAdminNow ? "Admin mode: enabled" : "Admin mode: disabled";
+      }
+    }
+
+    // Применяем текст для всех элементов с data-i18n уже в начале setLang()
+    const titleEl = document.getElementById("app-title");
+    if (titleEl) titleEl.textContent = t.appTitle;
+
+
+    const loginBtn = document.getElementById("btn-login");
+    if (loginBtn) loginBtn.textContent = t.adminLogin;
+
+    // если нужны данные по data-i18n уже из шаблона, то они проставлены в начале setLang
+
+
+    const addModeBtn = document.getElementById("btn-add-mode");
+    if (addModeBtn) {
+      // не трогаем addModeActive (он ниже объявляется)
+      addModeBtn.textContent = t.btnAddPoint;
+    }
+
+
+    const loadingEl = document.getElementById("view-panorama-loading");
+    if (loadingEl) {
+      const p = loadingEl.querySelector("p");
+      if (p) p.textContent = t.loadingPanorama;
+    }
+  }
+
+  if (langRuBtn) langRuBtn.addEventListener("click", () => setLang("ru"));
+  if (langEnBtn) langEnBtn.addEventListener("click", () => setLang("en"));
+
+  // addModeActive объявляется ниже, поэтому initial setLang без изменения текста кнопки add
+  setLang(currentLang);
+
+
+  // ------------------------------------------------------------------
   // Карта (Leaflet + OSM)
   // ------------------------------------------------------------------
 
-  // Тюмень по умолчанию
-  const map = L.map("map").setView([57.1509, 65.5273], 11);
+  // Тюмень по умолчанию (можно переопределить data-map-center в шаблоне)
+  const centerAttr = appEl.dataset.mapCenter || "57.1509,65.5273";
+  const [centerLat, centerLon] = centerAttr.split(",").map((v) => parseFloat(v.trim()));
+  const map = L.map("map").setView([centerLat, centerLon], 11);
+
 
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
@@ -113,7 +223,8 @@
       }
 
       currentLocationBtn.disabled = true;
-      currentLocationBtn.textContent = "Определяем…";
+      currentLocationBtn.textContent = currentLang === "en" ? "Locating…" : "Определяем…";
+
 
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
@@ -122,6 +233,8 @@
 
           // Центрируем карту на текущее местоположение
           map.setView([lat, lon], 16);
+          // чтобы при смене языка не было скачка — текст кнопки задаём через i18n
+          currentLocationBtn.textContent = currentLocationBtn.dataset.i18n ? getI18n(currentLocationBtn.dataset.i18n) : currentLocationBtn.textContent;
 
           try {
             // Обновляем боковую сводку по текущим координатам
@@ -134,14 +247,16 @@
           } catch (_) {}
 
           currentLocationBtn.disabled = false;
-          currentLocationBtn.textContent = "Текущее местоположение";
+          currentLocationBtn.textContent = currentLang === "en" ? "Current location" : "Текущее местоположение";
+
         },
-        (err) => {
+        (err) => { 
           console.warn("Geolocation error:", err);
           alert("Не удалось получить геолокацию. Разрешите доступ к местоположению.");
           currentLocationBtn.disabled = false;
-          currentLocationBtn.textContent = "Текущее местоположение";
+          currentLocationBtn.textContent = currentLocationBtn.dataset.i18n ? getI18n(currentLocationBtn.dataset.i18n) : "Текущее местоположение";
         },
+
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 2000 }
       );
     });
@@ -163,11 +278,12 @@
     if (!poiEl) return;
 
     if (!data || data.status !== "ok") {
-      poiEl.innerHTML = `<p class="hint">Сводка недоступна</p>`;
+    poiEl.innerHTML = `<p class="hint">${currentLang === "en" ? "Summary unavailable" : "Сводка недоступна"}</p>`;
+
       return;
     }
 
-    const categories = data.categories || [];
+    const categories = (data.categories || []).filter((c) => (c.count || 0) > 0);
     if (!categories.length) {
       poiEl.innerHTML = `<p class="hint">В радиусе ${data.radius_m}м объектов не найдено</p>`;
       return;
@@ -178,12 +294,14 @@
       const count = cat.count || 0;
       const items = cat.items || [];
 
+
       const wrapper = document.createElement("div");
       wrapper.className = "poi-category";
 
       const head = document.createElement("div");
       head.className = "poi-category-head";
 
+      // В EN/RU перевод не обязателен для названий категорий (категории уже рус/анг в API)
       const name = document.createElement("div");
       name.className = "name";
       name.textContent = `${cat.name}`;
@@ -192,15 +310,17 @@
       c.className = "count";
       c.textContent = `${count}`;
 
+
       head.appendChild(name);
       head.appendChild(c);
 
       const list = document.createElement("div");
       if (!items.length) {
-        const empty = document.createElement("p");
+      const empty = document.createElement("p");
         empty.className = "hint";
-        empty.textContent = "не найдено";
+        empty.textContent = currentLang === "en" ? "not found" : "не найдено";
         list.appendChild(empty);
+
       } else {
         items.forEach((it) => {
           const p = document.createElement("div");
@@ -273,45 +393,127 @@
     }
   }
 
+  function showPanoramaFallback(containerId, url, statusEl, loadingEl) {
+    const container = document.getElementById(containerId);
+    if (!container) return null;
+    container.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = currentLang === "en" ? "Panorama" : "Панорама";
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "contain";
+    img.style.display = "block";
+    img.addEventListener("load", () => {
+      statusEl.classList.add("hidden");
+      if (loadingEl) loadingEl.classList.add("hidden");
+    });
+    img.addEventListener("error", () => {
+      statusEl.textContent = currentLang === "en" ? "Panorama failed to load." : "Не удалось загрузить панораму.";
+      statusEl.classList.remove("hidden");
+      if (loadingEl) loadingEl.classList.add("hidden");
+    });
+    container.appendChild(img);
+    return { viewer: null, fallback: true };
+  }
+
   /**
    * Запрашивает панораму у бэкенда и монтирует её в Pannellum-контейнер.
    * containerId — id div-контейнера, statusElId — id элемента для статуса.
    * Возвращает объект { viewer } либо null, если панорамы нет/ошибка.
    */
-  async function loadPanoramaInto(containerId, statusElId, lat, lon) {
+  async function loadPanoramaInto(containerId, statusElId, lat, lon, options = {}) {
+    // Гарантированно пересоздаём WebGL-вьюер (иначе при WebGL context lost Pannellum остаётся в поломанном состоянии)
+    destroyViewers();
+
     const statusEl = document.getElementById(statusElId);
     const container = document.getElementById(containerId);
+    const loadingElId = options.loadingElId || null;
+    const loadingEl = loadingElId ? document.getElementById(loadingElId) : null;
+
     container.innerHTML = "";
-    statusEl.textContent = "Ищем панораму рядом с точкой…";
+    if (loadingEl) loadingEl.classList.remove("hidden");
+
+    statusEl.textContent = currentLang === "en" ? "Searching for panorama nearby…" : "Ищем панораму рядом с точкой…";
+
+
     statusEl.classList.remove("hidden");
+
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lon: String(lon),
+    });
+    if (options.force) {
+      params.set("force", "1");
+    }
 
     let data;
     try {
-      const res = await fetch(`/api/panorama?lat=${lat}&lon=${lon}`);
+      const res = await fetch(`/api/panorama?${params.toString()}`);
       data = await res.json();
     } catch (err) {
       statusEl.textContent = "Не удалось связаться с сервером панорам.";
+      if (loadingEl) loadingEl.classList.add("hidden");
       return null;
     }
 
     if (data.status === "not_found") {
       statusEl.textContent = "Рядом с этой точкой панорама Яндекса не найдена.";
+      if (loadingEl) loadingEl.classList.add("hidden");
       return null;
     }
     if (data.status === "error") {
       statusEl.textContent = "Ошибка получения панорамы: " + (data.message || "неизвестно");
+      if (loadingEl) loadingEl.classList.add("hidden");
       return null;
     }
 
     statusEl.classList.add("hidden");
+    if (loadingEl) loadingEl.classList.add("hidden");
 
-    const viewer = pannellum.viewer(containerId, {
-      type: "equirectangular",
-      panorama: data.url,
-      autoLoad: true,
-      showControls: true,
-      compass: false,
-    });
+    let viewer;
+    try {
+      viewer = pannellum.viewer(containerId, {
+        type: "equirectangular",
+        panorama: data.url,
+        autoLoad: true,
+        showControls: true,
+        compass: false,
+        autoRotate: false,
+        useCanvas: true,
+      });
+    } catch (err) {
+      console.warn("Pannellum failed to initialize, falling back to static image.", err);
+      return showPanoramaFallback(containerId, data.url, statusEl, loadingEl);
+    }
+
+    const canvas = container.querySelector("canvas");
+    if (canvas) {
+      canvas.addEventListener("webglcontextlost", (event) => {
+        event.preventDefault();
+        console.warn("WebGL context lost on panorama canvas, switching to fallback image.");
+        destroyViewers();
+        showPanoramaFallback(containerId, data.url, statusEl, loadingEl);
+      });
+    }
+
+    if (viewer && typeof viewer.on === "function") {
+      viewer.on("error", (message) => {
+        console.warn("Pannellum emitted error, switching to fallback image:", message);
+        destroyViewers();
+        showPanoramaFallback(containerId, data.url, statusEl, loadingEl);
+      });
+    }
+
+    try {
+      const imgEl = container.querySelector("img");
+      if (imgEl) {
+        imgEl.addEventListener("error", () => {
+          statusEl.textContent = currentLang === "en" ? "Panorama tiles failed to load" : "Не удалось догрузить панораму";
+          statusEl.classList.remove("hidden");
+        });
+      }
+    } catch (_) {}
 
     return { viewer, data };
   }
@@ -326,14 +528,29 @@
     currentViewPoint = point;
     document.getElementById("view-point-title").textContent = point.title;
     document.getElementById("view-point-description").textContent = point.description || "";
+
+    // очистка прошлого экрана сразу
+    const loadingEl = document.getElementById("view-panorama-loading");
+    const statusEl = document.getElementById("view-panorama-status");
+    const panoEl = document.getElementById("view-panorama");
+    if (panoEl) panoEl.innerHTML = "";
+    if (loadingEl) loadingEl.classList.remove("hidden");
+    if (statusEl) {
+      statusEl.textContent = "";
+      statusEl.classList.remove("hidden");
+    }
+
     showModal("view-point-modal");
+
 
     const result = await loadPanoramaInto(
       "view-panorama",
       "view-panorama-status",
       point.lat,
-      point.lon
+      point.lon,
+      { loadingElId: "view-panorama-loading" }
     );
+
     if (result) viewViewer = result.viewer;
 
     // обновляем боковую сводку по координатам точки
@@ -345,7 +562,8 @@
   async function openAirPano(panoPoint) {
     // air pano не удаляется, просто открываем и грузим сводку по pano lat/lon
     currentViewPoint = panoPoint;
-    document.getElementById("view-point-title").textContent = panoPoint.title || "Воздушная панорама";
+    document.getElementById("view-point-title").textContent = panoPoint.title || (currentLang === "en" ? "Air panorama" : "Воздушная панорама");
+
     document.getElementById("view-point-description").textContent = panoPoint.description || "";
     showModal("view-point-modal");
 
@@ -353,13 +571,43 @@
       "view-panorama",
       "view-panorama-status",
       panoPoint.lat,
-      panoPoint.lon
+      panoPoint.lon,
+      { loadingElId: "view-panorama-loading" }
     );
     if (result) viewViewer = result.viewer;
 
     if (panoPoint && panoPoint.lat != null && panoPoint.lon != null) {
       loadPoiSummaryForLatLon(panoPoint.lat, panoPoint.lon);
     }
+  }
+
+  const reloadBtn = document.getElementById("view-point-reload");
+  if (reloadBtn) {
+    reloadBtn.addEventListener("click", async () => {
+      if (!currentViewPoint || currentViewPoint.lat == null || currentViewPoint.lon == null) return;
+
+      // принудительно обновим панораму
+      const statusEl = document.getElementById("view-panorama-status");
+      const loadingEl = document.getElementById("view-panorama-loading");
+      const panoEl = document.getElementById("view-panorama");
+      if (panoEl) panoEl.innerHTML = "";
+      if (loadingEl) loadingEl.classList.remove("hidden");
+      if (statusEl) statusEl.textContent = currentLang === "en" ? "Reloading panorama…" : "Перезагрузка панорамы…";
+
+      destroyViewers();
+      const result = await loadPanoramaInto(
+        "view-panorama",
+        "view-panorama-status",
+        currentViewPoint.lat,
+        currentViewPoint.lon,
+        { loadingElId: "view-panorama-loading", force: true }
+      );
+      if (result) viewViewer = result.viewer;
+
+      if (currentViewPoint && currentViewPoint.lat != null && currentViewPoint.lon != null) {
+        loadPoiSummaryForLatLon(currentViewPoint.lat, currentViewPoint.lon);
+      }
+    });
   }
 
   const deleteBtn = document.getElementById("view-point-delete");
@@ -424,6 +672,9 @@
 
   const addModeBtn = document.getElementById("btn-add-mode");
   if (addModeBtn) {
+    const t = LANG[currentLang];
+    if (!addModeActive) addModeBtn.textContent = t.btnAddPoint;
+
     addModeBtn.addEventListener("click", () => {
       addModeActive = !addModeActive;
       addModeBtn.classList.toggle("active", addModeActive);
@@ -432,6 +683,7 @@
         : "Добавить точку";
     });
   }
+
 
   if (isAdmin) {
     map.on("click", (e) => {
