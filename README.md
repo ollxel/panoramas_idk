@@ -2,8 +2,8 @@
 
 [English README](README.md) | [Russian README](README_RU.md)
 
-![](screen1.jpg)
-![](screen2.jpg)
+![](screen1.png)
+![](screen2.png)
 
 A Flask application featuring an OpenStreetMap (Leaflet) map where an administrator can place points (stored in SQLite and visible to all visitors). When a user clicks on a point, the server downloads the corresponding Yandex Maps panorama for those coordinates and displays it in an embedded 360° viewer powered by Pannellum.
 
