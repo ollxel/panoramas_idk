@@ -1,0 +1,103 @@
+{
+  "city": "tyumen",
+  "city_id_com": 55,
+  "city_id_ru": 55,
+  "source": "user approved list only – 8 categories",
+  "categories": [
+    {
+      "key": "pharmacy",
+      "name_ru": "Аптеки",
+      "query_ru": "аптека",
+      "display_en": "Pharmacies",
+      "slug": "pharmacy",
+      "category_id": "184105932",
+      "mode": "category",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/category/pharmacy/184105932/?l=stv%2Csta&ll={lon}%2C{lat}&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&z={z}",
+      "priority": "P0"
+    },
+    {
+      "key": "atm",
+      "name_ru": "Банкоматы",
+      "query_ru": "Банкоматы",
+      "display_en": "ATMs",
+      "slug": "atm",
+      "category_id": "184105402",
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=ATMs&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%91%D0%B0%D0%BD%D0%BA%D0%BE%D0%BC%D0%B0%D1%82%D1%8B&z={z}",
+      "priority": "P0"
+    },
+    {
+      "key": "gas",
+      "name_ru": "АЗС",
+      "query_ru": "АЗС",
+      "display_en": "Gas stations",
+      "slug": "gas_station",
+      "category_id": "184105274",
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=Gas%20stations&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%90%D0%97%D0%A1&z={z}",
+      "priority": "P1"
+    },
+    {
+      "key": "sport",
+      "name_ru": "Спорт",
+      "query_ru": "Спорт",
+      "display_en": "Sport",
+      "slug": null,
+      "category_id": null,
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=Sport&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%A1%D0%BF%D0%BE%D1%80%D1%82&z={z}",
+      "priority": "P2"
+    },
+    {
+      "key": "cafe",
+      "name_ru": "Кафе",
+      "query_ru": "Кафе",
+      "display_en": "Cafes",
+      "slug": "cafe",
+      "category_id": "184106390",
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=Cafes&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%9A%D0%B0%D1%84%D0%B5&z={z}",
+      "priority": "P1"
+    },
+    {
+      "key": "shopping_mall",
+      "name_ru": "Торговые центры",
+      "query_ru": "Торговые центры",
+      "display_en": "Shopping malls",
+      "slug": "shopping_mall",
+      "category_id": "184108083",
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=Shopping%20malls&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%A2%D0%BE%D1%80%D0%B3%D0%BE%D0%B2%D1%8B%D0%B5%20%D1%86%D0%B5%D0%BD%D1%82%D1%80%D1%8B&z={z}",
+      "priority": "P0"
+    },
+    {
+      "key": "groceries",
+      "name_ru": "Продукты",
+      "query_ru": "Продукты",
+      "display_en": "Groceries",
+      "slug": "supermarket",
+      "category_id": "184108079",
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=Groceries&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%9F%D1%80%D0%BE%D0%B4%D1%83%D0%BA%D1%82%D1%8B&z={z}",
+      "priority": "P0"
+    },
+    {
+      "key": "restaurants",
+      "name_ru": "Где поесть / Рестораны",
+      "query_ru": "Где поесть",
+      "display_en": "Restaurants",
+      "slug": "restaurant",
+      "category_id": "184106394",
+      "mode": "search_display",
+      "yandex_com_url_template": "https://yandex.com/maps/55/tyumen/?display-text=Restaurants&l=stv%2Csta&ll={lon}%2C{lat}&mode=search&sll={sll_lon}%2C{sll_lat}&sspn={sspn_lon}%2C{sspn_lat}&text=%D0%93%D0%B4%D0%B5%20%D0%BF%D0%BE%D0%B5%D1%81%D1%82%D1%8C&z={z}",
+      "priority": "P1"
+    }
+  ],
+  "notes": [
+    "ONLY these 8 categories – user approved list, no vet, no bars, no kids centers",
+    "category mode where possible: pharmacy",
+    "all others: search mode with display-text + l=stv,sta – exactly as user URLs",
+    "city_id = 55 for both yandex.com and yandex.ru (Tyumen)",
+    "coordinate order: ll=lon,lat"
+  ]
+}

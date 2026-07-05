@@ -27,6 +27,10 @@
         {{ 'Режим администратора включён' if is_admin else 'Режим просмотра' }}
       </span>
 
+      <button id="btn-current-location" class="btn btn-ghost" type="button">
+        Текущее местоположение
+      </button>
+
       {% if is_admin %}
         <button id="btn-add-mode" class="btn btn-primary">Добавить точку</button>
         <button id="btn-logout" class="btn btn-ghost">Выйти из админки</button>
@@ -76,10 +80,22 @@
   <!-- Модалка просмотра панорамы существующей точки -->
   <div id="view-point-modal" class="modal hidden">
     <div class="modal-card wide">
-      <h2 id="view-point-title"></h2>
-      <p id="view-point-description" class="hint"></p>
-      <div id="view-panorama" class="panorama-box"></div>
-      <p id="view-panorama-status" class="hint"></p>
+      <div class="view-layout">
+        <div class="view-left">
+          <h2 id="view-point-title"></h2>
+          <p id="view-point-description" class="hint"></p>
+          <div id="view-panorama" class="panorama-box"></div>
+          <p id="view-panorama-status" class="hint"></p>
+        </div>
+
+        <aside class="view-right">
+          <h3>Сводка по БД</h3>
+          <div id="poi-summary" class="poi-summary">
+            <p class="hint">Ожидаем данные о ближайших объектах…</p>
+          </div>
+        </aside>
+      </div>
+
       <div class="modal-actions">
         {% if is_admin %}
           <button id="view-point-delete" class="btn btn-danger">Удалить точку</button>
