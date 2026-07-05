@@ -2,8 +2,7 @@
 
 [English README](README.md) | [Русский README](README_RU.md)
 
-![](screen1.jpg)
-![](screen2.jpg)
+![](screen1.png)
 
 Flask-приложение: карта OpenStreetMap (Leaflet), на которой администратор
 отмечает точки (сохраняются в SQLite и видны всем посетителям). При клике
@@ -54,6 +53,8 @@ python3 app.py
 ```
 
 Откройте http://localhost:5000
+
+![](screen2.png)
 
 ## Как пользоваться
 
