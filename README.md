@@ -3,7 +3,6 @@
 [English README](README.md) | [Russian README](README_RU.md)
 
 ![](screen1.png)
-![](screen2.png)
 
 A Flask application featuring an OpenStreetMap (Leaflet) map where an administrator can place points (stored in SQLite and visible to all visitors). When a user clicks on a point, the server downloads the corresponding Yandex Maps panorama for those coordinates and displays it in an embedded 360° viewer powered by Pannellum.
 
@@ -53,6 +52,7 @@ Environment variables (can be set via a `.env` file using `python-dotenv` or exp
 | `FLASK_SECRET_KEY` | Secret key for Flask sessions | Insecure development key |
 | `PANO_ZOOM` | Panorama zoom level | `2` |
 
+
 ## Running
 
 ```bash
@@ -64,6 +64,9 @@ python3 app.py
 Open:
 
 http://localhost:5000
+
+![](screen2.png)
+
 
 ## Usage
 
