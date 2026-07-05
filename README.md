@@ -1,29 +1,38 @@
 # OSM + Yandex Panorama Points
 
-Flask-приложение: карта OpenStreetMap (Leaflet), на которой администратор
-отмечает точки (сохраняются в SQLite и видны всем посетителям). При клике
-по точке сервер скачивает панораму Яндекс.Карт для этих координат и
-показывает её во встроенном 360°-вьювере (Pannellum).
+[English README](README.md) | [Russian README](README_RU.md)
 
-## Как это работает с панорамами
+A Flask application featuring an OpenStreetMap (Leaflet) map where an administrator can place points (stored in SQLite and visible to all visitors). When a user clicks on a point, the server downloads the corresponding Yandex Maps panorama for those coordinates and displays it in an embedded 360° viewer powered by Pannellum.
 
-Скачивание и сборка панорамы портированы из репозитория
+## How Panorama Retrieval Works
+
+Panorama downloading and stitching are ported from the repository
 [zer0-dev/yandex-pano-downloader](https://github.com/zer0-dev/yandex-pano-downloader)
-(файл `pano_downloader.py`, лицензия MIT). Логика:
+(`pano_downloader.py`, MIT License).
 
-1. Запрос к `https://api-maps.yandex.ru/services/panoramas/1.x/?l=stv&ll={lon},{lat}&provider=streetview`
-   — отдаёт метаданные ближайшей панорамы (`imageId`, размеры тайлов, уровни зума).
-   **Apikey не требуется** — это тот же недокументированный эндпоинт, которым
-   пользуется сам JS-виджет Яндекс.Карт на их сайте.
-2. Тайлы панорамы скачиваются с `https://pano.maps.yandex.net/{imageId}/{zoom}.{x}.{y}`
-   и склеиваются в одну JPEG-картинку (Pillow + aiohttp, асинхронно).
-3. Готовая картинка кэшируется в `static/panoramas/` и раздаётся Flask'ом как
-   обычный статический файл.
-4. На фронтенде эта equirectangular-картинка разворачивается в интерактивную
-   360°-панораму библиотекой [Pannellum](https://pannellum.org/) (CDN, без ключей).
+1. A request is sent to:
 
+   ```
+   https://api-maps.yandex.ru/services/panoramas/1.x/?l=stv&ll={lon},{lat}&provider=streetview
+   ```
 
-## Установка
+   This returns metadata for the nearest panorama (`imageId`, tile dimensions, zoom levels).
+   **No API key is required.**
+
+2. Panorama tiles are downloaded from:
+
+   ```
+   https://pano.maps.yandex.net/{imageId}/{zoom}.{x}.{y}
+   ```
+
+   and stitched into a single JPEG image.
+
+3. The resulting image is cached in `static/panoramas/` and served by Flask as a regular static file.
+
+4. On the frontend, the equirectangular image is rendered as an interactive 360° panorama using
+   [Pannellum](https://pannellum.org/) (loaded via CDN, no API keys required).
+
+## Installation
 
 ```bash
 python3 -m venv venv
@@ -31,53 +40,46 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## Настройка
+## Configuration
 
-Переменные окружения (можно задать через `.env` + `python-dotenv`, либо
-экспортом в шелле):
+Environment variables (can be set via a `.env` file using `python-dotenv` or exported directly in the shell):
 
-| Переменная         | Назначение                              | По умолчанию   |
-|---------------------|------------------------------------------|----------------|
-| `ADMIN_PASSWORD`    | Пароль администратора                    | `admin123`     |
-| `FLASK_SECRET_KEY`  | Секрет для сессий Flask                  | небезопасный dev-ключ |
-| `PANO_ZOOM`         | Уровень зума панорамы (0 — макс. детализация, крупный файл) | `2` |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `ADMIN_PASSWORD` | Administrator password | `admin123` |
+| `FLASK_SECRET_KEY` | Secret key for Flask sessions | Insecure development key |
+| `PANO_ZOOM` | Panorama zoom level | `2` |
 
-**Обязательно смените `ADMIN_PASSWORD` и `FLASK_SECRET_KEY` перед реальным
-использованием.**
-
-## Запуск
+## Running
 
 ```bash
-export ADMIN_PASSWORD=мойсекретныйпароль
+export ADMIN_PASSWORD=my_secure_password
 export FLASK_SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 python3 app.py
 ```
 
-Откройте http://localhost:5000
+Open:
 
-## Как пользоваться
+http://localhost:5000
 
-- **Обычный посетитель**: видит все сохранённые точки на карте, клик по
-  точке — открывается панорама (если Яндекс её нашёл поблизости).
-- **Администратор**: кнопка «Вход для администратора» → пароль из
-  `ADMIN_PASSWORD` → появляется кнопка «Добавить точку». Включаете режим,
-  кликаете по карте — открывается форма с названием/описанием и сразу же
-  превью панорамы в этой точке (можно убедиться, что панорама вообще есть,
-  до сохранения). «Сохранить точку» — точка попадает в базу и становится
-  видна всем. Из карточки просмотра админ также может удалить точку.
+## Usage
 
-## Структура проекта
+- **Visitor:** Can view all saved points on the map. Clicking a point opens the panorama (if Yandex provides one nearby).
+- **Administrator:** Click **"Administrator Login"**, enter the password specified in `ADMIN_PASSWORD`, and the **"Add Point"** mode becomes available. Clicking on the map opens a form where you can enter a title, description, and preview the panorama for that location. Saved points become visible to all visitors.
 
-```
+## Project Structure
+
+```text
 panorama-app/
-├── app.py                 # Flask-бэкенд: точки (CRUD), сессии, /api/panorama
-├── pano_downloader.py      # скачивание/сборка панорам (порт zer0-dev/yandex-pano-downloader)
+├── app.py                      # Flask backend: points (CRUD), sessions, /api/panorama
+├── pano_downloader.py          # Panorama downloading and stitching
+├── results_8cat_tyumen_v88.csv # Source POI dataset
 ├── requirements.txt
-├── points.db               # создаётся автоматически (SQLite)
+├── points.db                   # Automatically created SQLite database
 ├── templates/
 │   └── index.html
 └── static/
     ├── css/style.css
     ├── js/map.js
-    └── panoramas/           # кэш собранных JPG-панорам (создаётся автоматически)
+    └── panoramas/              # Cache of generated panorama JPEGs
 ```
