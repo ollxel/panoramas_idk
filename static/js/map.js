@@ -144,6 +144,27 @@
     return div.innerHTML;
   }
 
+  function _toRadians(deg) {
+    return (deg * Math.PI) / 180;
+  }
+
+  function _toDegrees(rad) {
+    return (rad * 180) / Math.PI;
+  }
+
+  function _normalizeAngle(deg) {
+    return ((deg % 360) + 360) % 360;
+  }
+
+  function computeBearing(lat1, lon1, lat2, lon2) {
+    const phi1 = _toRadians(lat1);
+    const phi2 = _toRadians(lat2);
+    const deltaLambda = _toRadians(lon2 - lon1);
+    const y = Math.sin(deltaLambda) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+    return _normalizeAngle(_toDegrees(Math.atan2(y, x)));
+  }
+
   function addMarker(point) {
     const marker = L.marker([point.lat, point.lon]).addTo(map);
     marker.bindPopup(markerPopupHtml(point));
@@ -273,9 +294,11 @@
     document.getElementById(id).classList.add("hidden");
   }
 
-  function renderPoiSummary(data) {
+  function renderPoiSummary(data, centerPoint) {
     const poiEl = document.getElementById("poi-summary");
     if (!poiEl) return;
+
+    clearPoiMarkers();
 
     if (!data || data.status !== "ok") {
     poiEl.innerHTML = `<p class="hint">${currentLang === "en" ? "Summary unavailable" : "Сводка недоступна"}</p>`;
@@ -290,10 +313,10 @@
     }
 
     poiEl.innerHTML = "";
+    const allItems = [];
     categories.forEach((cat) => {
       const count = cat.count || 0;
       const items = cat.items || [];
-
 
       const wrapper = document.createElement("div");
       wrapper.className = "poi-category";
@@ -301,7 +324,6 @@
       const head = document.createElement("div");
       head.className = "poi-category-head";
 
-      // В EN/RU перевод не обязателен для названий категорий (категории уже рус/анг в API)
       const name = document.createElement("div");
       name.className = "name";
       name.textContent = `${cat.name}`;
@@ -310,32 +332,54 @@
       c.className = "count";
       c.textContent = `${count}`;
 
-
       head.appendChild(name);
       head.appendChild(c);
 
       const list = document.createElement("div");
       if (!items.length) {
-      const empty = document.createElement("p");
+        const empty = document.createElement("p");
         empty.className = "hint";
         empty.textContent = currentLang === "en" ? "not found" : "не найдено";
         list.appendChild(empty);
-
       } else {
-        items.forEach((it) => {
+        items.forEach((it, itemIndex) => {
           const p = document.createElement("div");
           p.className = "poi-item";
 
-          const title = it.title ? it.title : "Объект";
+              const title = it.title ? it.title : "Объект";
           const dist = it.dist_m != null ? it.dist_m : "";
+          const bearing = centerPoint && it.lat != null && it.lon != null ? computeBearing(centerPoint.lat, centerPoint.lon, it.lat, it.lon) : null;
 
-          if (it.org_url) {
-            p.innerHTML = `<a href="${escapeHtml(it.org_url)}" target="_blank" rel="noreferrer">${escapeHtml(
-              title
-            )}</a> <span class="dist">— ${dist}м</span>`;
-          } else {
-            p.innerHTML = `${escapeHtml(title)} <span class="dist">— ${dist}м</span>`;
+          const poiItem = {
+            category: cat.key,
+            title,
+            dist_m: dist,
+            bearing,
+            lat: it.lat,
+            lon: it.lon,
+          };
+          allItems.push(poiItem);
+          if (itemIndex === 0 && bearing != null) {
+            currentPoiItems.push(poiItem);
           }
+
+          const titleHtml = it.org_url
+            ? `<a href="${escapeHtml(it.org_url)}" target="_blank" rel="noreferrer">${escapeHtml(title)}</a>`
+            : escapeHtml(title);
+
+          const distSpan = document.createElement("span");
+          distSpan.className = "dist";
+          distSpan.textContent = `— ${dist}м`;
+          if (bearing != null) {
+            distSpan.style.cursor = "pointer";
+            distSpan.style.color = "var(--accent)";
+            distSpan.addEventListener("click", () => {
+              focusPoiYaw(bearing);
+            });
+          }
+
+          p.innerHTML = titleHtml + " ";
+          p.appendChild(distSpan);
           list.appendChild(p);
         });
       }
@@ -344,7 +388,157 @@
       wrapper.appendChild(list);
       poiEl.appendChild(wrapper);
     });
+
+    if (centerPoint && currentPoiItems.length) {
+      renderPoiOverlay(currentPoiItems);
+    }
   }
+
+  let currentPoiItems = [];
+  let poiOverlay = null;
+  let poiOverlayFrame = null;
+
+  function clearPoiMarkers() {
+    currentPoiItems = [];
+    renderPoiOverlay([]);
+  }
+
+  function ensurePoiOverlay(container) {
+    if (!container) return null;
+    if (!poiOverlay || poiOverlay.parentNode !== container) {
+      destroyPoiOverlay();
+      poiOverlay = document.createElement("div");
+      poiOverlay.className = "panorama-poi-overlay";
+      poiOverlay.style.position = "absolute";
+      poiOverlay.style.top = "0";
+      poiOverlay.style.left = "0";
+      poiOverlay.style.right = "0";
+      poiOverlay.style.bottom = "0";
+      poiOverlay.style.pointerEvents = "none";
+      poiOverlay.style.zIndex = "12";
+      container.appendChild(poiOverlay);
+    }
+    return poiOverlay;
+  }
+
+  function destroyPoiOverlay() {
+    if (poiOverlayFrame) {
+      cancelAnimationFrame(poiOverlayFrame);
+      poiOverlayFrame = null;
+    }
+    if (poiOverlay && poiOverlay.parentNode) {
+      poiOverlay.parentNode.removeChild(poiOverlay);
+    }
+    poiOverlay = null;
+  }
+
+  function renderPoiOverlay(items) {
+    currentPoiItems = items || [];
+    if (!poiOverlay) return;
+    poiOverlay.innerHTML = "";
+    currentPoiItems.forEach((item, index) => {
+      if (item.bearing == null) return;
+      const marker = document.createElement("button");
+      marker.type = "button";
+      marker.className = "pano-poi-marker";
+      marker.style.position = "absolute";
+      marker.style.pointerEvents = "auto";
+      marker.style.padding = "0";
+      marker.style.cursor = "pointer";
+      marker.dataset.index = index;
+      marker.innerHTML = `<span class="pano-poi-dot"></span><span class="pano-poi-tooltip">${escapeHtml(item.title)}</span>`;
+      marker.addEventListener("click", () => {
+        if (item.bearing != null) {
+          focusPoiYaw(item.bearing);
+        }
+      });
+      poiOverlay.appendChild(marker);
+    });
+    updatePoiOverlay();
+    startPoiOverlayLoop();
+  }
+
+  function updatePoiOverlay() {
+    if (!poiOverlay || !viewViewer) return;
+    const yawDeg = _normalizeAngle(viewViewer.getYaw());
+    const hfovDeg = viewViewer.getHfov();
+    const pitchDeg = typeof viewViewer.getPitch === "function" ? viewViewer.getPitch() : 0;
+    const rect = poiOverlay.getBoundingClientRect();
+    const width = rect.width;
+    const height = rect.height;
+    if (!width || !height) return;
+
+    // Pannellum doesn't expose a vertical FOV getter, so we derive one the
+    // same way a standard perspective camera would, from hfov + aspect ratio.
+    const hfov = _toRadians(hfovDeg);
+    const vfov = 2 * Math.atan(Math.tan(hfov / 2) * (height / width));
+    const pitch = _toRadians(pitchDeg);
+    const tanHalfV = Math.tan(vfov / 2);
+    const margin = 12; // px — hide markers once they'd render past the edge
+
+    // Horizontal and vertical are handled as two independent axes on
+    // purpose: horizontal position/visibility depends only on yaw (exactly
+    // as before pitch was ever involved), vertical position/visibility
+    // depends only on pitch. Mixing the two (a full 3D rotation) produces
+    // technically "correct" perspective, but it also drags markers
+    // sideways as you tilt, which reads as random/diagonal motion. This
+    // keeps each marker's movement predictable: tilt up -> it slides down;
+    // pan right -> it slides left; nothing moves diagonally on its own.
+    Array.from(poiOverlay.children).forEach((marker) => {
+      const index = Number(marker.dataset.index);
+      const item = currentPoiItems[index];
+      if (!item || item.bearing == null) {
+        marker.style.display = "none";
+        return;
+      }
+
+      // Horizontal: pure function of yaw.
+      let diff = item.bearing - yawDeg;
+      diff = ((diff + 180) % 360) - 180;
+      if (Math.abs(diff) > hfovDeg / 2) {
+        marker.style.display = "none";
+        return;
+      }
+      const x = width / 2 + (diff / hfovDeg) * width;
+
+      // Vertical: pure function of pitch. POIs are treated as sitting on
+      // the horizon (elevation 0), so their angle relative to the camera
+      // is simply -pitch — this is the world-fixed direction that slides
+      // down when you look up and up when you look down.
+      const angleFromCenter = -pitch;
+      const ndcY = Math.tan(angleFromCenter) / tanHalfV;
+      if (Math.abs(ndcY) > 1) {
+        marker.style.display = "none";
+        return;
+      }
+      const y = height / 2 - (ndcY * height) / 2;
+      if (y <= margin || y >= height - margin) {
+        marker.style.display = "none";
+        return;
+      }
+
+      marker.style.display = "block";
+      marker.style.left = `${x}px`;
+      marker.style.top = `${y}px`;
+      marker.style.transform = "translateX(-50%)";
+    });
+  }
+
+  function startPoiOverlayLoop() {
+    if (poiOverlayFrame) return;
+    const tick = () => {
+      updatePoiOverlay();
+      poiOverlayFrame = requestAnimationFrame(tick);
+    };
+    tick();
+  }
+
+  function focusPoiYaw(angle) {
+    if (!viewViewer || typeof viewViewer.setYaw !== "function") return;
+    viewViewer.setYaw(_normalizeAngle(angle), 700);
+  }
+
+
 
   async function loadPoiSummaryForLatLon(lat, lon) {
     const poiEl = document.getElementById("poi-summary");
@@ -364,7 +558,7 @@
       poiEl.innerHTML = `<p class="hint">Не удалось получить сводку.</p>`;
       return;
     }
-    renderPoiSummary(data);
+    renderPoiSummary(data, currentViewPoint);
   }
 
   document.querySelectorAll(".js-close-modal").forEach((btn) => {
@@ -391,6 +585,8 @@
       viewViewer.destroy();
       viewViewer = null;
     }
+    currentPoiItems = [];
+    destroyPoiOverlay();
   }
 
   function showPanoramaFallback(containerId, url, statusEl, loadingEl) {
@@ -432,6 +628,7 @@
     const loadingEl = loadingElId ? document.getElementById(loadingElId) : null;
 
     container.innerHTML = "";
+    ensurePoiOverlay(container);
     if (loadingEl) loadingEl.classList.remove("hidden");
 
     statusEl.textContent = currentLang === "en" ? "Searching for panorama nearby…" : "Ищем панораму рядом с точкой…";
@@ -481,7 +678,9 @@
         compass: false,
         autoRotate: false,
         useCanvas: true,
+        hotSpots: [],
       });
+      ensurePoiOverlay(container);
     } catch (err) {
       console.warn("Pannellum failed to initialize, falling back to static image.", err);
       return showPanoramaFallback(containerId, data.url, statusEl, loadingEl);
@@ -498,6 +697,11 @@
     }
 
     if (viewer && typeof viewer.on === "function") {
+      viewer.on("load", () => {
+        if (currentPoiItems.length) {
+          renderPoiOverlay(currentPoiItems);
+        }
+      });
       viewer.on("error", (message) => {
         console.warn("Pannellum emitted error, switching to fallback image:", message);
         destroyViewers();
