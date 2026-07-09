@@ -547,6 +547,16 @@
       marker.style.transform = marker.classList.contains("pano-poi-marker--icon")
         ? "translate(-50%, -100%)"
         : "translateX(-50%)";
+
+      // Метраж под названием (как справа в сводке)
+      // item.dist_m — расстояние в метрах от текущей точки/камеры.
+      if (item.dist_m != null && item.dist_m !== "") {
+        const tooltipEl = marker.querySelector(".pano-poi-tooltip");
+        if (tooltipEl) {
+          const title = item.title ? escapeHtml(item.title) : "";
+          tooltipEl.innerHTML = `${title}<br/><span class="pano-poi-distance">${escapeHtml(String(item.dist_m))}м</span>`;
+        }
+      }
     });
   }
 
