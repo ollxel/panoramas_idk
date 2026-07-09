@@ -381,6 +381,39 @@ html, body {
   background: rgba(255, 255, 255, 1);
 }
 
+/* Category icon pins (markers/*.png) replace the plain dot when the POI's
+   category has a matching icon. No round background/border here — the PNG
+   is already a full pin shape. */
+.pano-poi-marker.pano-poi-marker--icon {
+  width: 34px;
+  height: 47px;
+  min-width: 34px;
+  min-height: 47px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.pano-poi-icon {
+  width: 34px;
+  height: 47px;
+  display: block;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+}
+
+.pano-poi-marker--icon .pano-poi-tooltip {
+  top: 0;
+  transform: translate(-50%, -100%) scale(0.95);
+}
+
+.pano-poi-marker--icon:hover .pano-poi-tooltip {
+  transform: translate(-50%, -112%) scale(1);
+}
+
 .pano-poi-tooltip {
   position: absolute;
   top: -10px;

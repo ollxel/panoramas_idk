@@ -398,6 +398,21 @@
   let poiOverlay = null;
   let poiOverlayFrame = null;
 
+  // category_key -> icon URL (e.g. "school" -> "/markers/school.png"),
+  // fetched once from the backend. Categories with no icon fall back to the
+  // plain dot marker.
+  let poiCategoryIcons = {};
+
+  async function loadPoiCategoryIcons() {
+    try {
+      const res = await fetch("/api/poi-icons");
+      poiCategoryIcons = await res.json();
+    } catch (e) {
+      poiCategoryIcons = {};
+    }
+  }
+  loadPoiCategoryIcons();
+
   function clearPoiMarkers() {
     currentPoiItems = [];
     renderPoiOverlay([]);
@@ -446,7 +461,13 @@
       marker.style.padding = "0";
       marker.style.cursor = "pointer";
       marker.dataset.index = index;
-      marker.innerHTML = `<span class="pano-poi-dot"></span><span class="pano-poi-tooltip">${escapeHtml(item.title)}</span>`;
+      const iconUrl = poiCategoryIcons[item.category];
+      if (iconUrl) {
+        marker.classList.add("pano-poi-marker--icon");
+        marker.innerHTML = `<img class="pano-poi-icon" src="${iconUrl}" alt="" /><span class="pano-poi-tooltip">${escapeHtml(item.title)}</span>`;
+      } else {
+        marker.innerHTML = `<span class="pano-poi-dot"></span><span class="pano-poi-tooltip">${escapeHtml(item.title)}</span>`;
+      }
       marker.addEventListener("click", () => {
         if (item.bearing != null) {
           focusPoiYaw(item.bearing);
@@ -520,7 +541,12 @@
       marker.style.display = "block";
       marker.style.left = `${x}px`;
       marker.style.top = `${y}px`;
-      marker.style.transform = "translateX(-50%)";
+      // Icon pins are teardrop-shaped with the point at the bottom, so they
+      // need to sit ABOVE (x,y) with their tip touching it. The plain dot
+      // marker keeps its original (smaller, centered-ish) anchoring.
+      marker.style.transform = marker.classList.contains("pano-poi-marker--icon")
+        ? "translate(-50%, -100%)"
+        : "translateX(-50%)";
     });
   }
 

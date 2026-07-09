@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from math import asin, cos, radians, sin, sqrt
 
-from flask import Flask, g, jsonify, render_template, request, session
+from flask import Flask, g, jsonify, render_template, request, send_from_directory, session
 
 from pano_downloader import (
     DEFAULT_TILE_LIMIT,
@@ -41,6 +41,9 @@ from pano_downloader import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, "points.db")
 PANO_CACHE_DIR = os.path.join(BASE_DIR, "static", "panoramas")
+# Category POI marker icons (PNG pins), served from a project-root "markers/"
+# folder rather than "static/" so it's easy to swap/update independently.
+MARKERS_DIR = os.path.join(BASE_DIR, "markers")
 
 # Кэш панорам чистим при старте, чтобы после правок/перезапуска
 # не оставались старые JPG и пользователь всегда видел актуальные данные.
@@ -385,6 +388,43 @@ def poi_summary():
             pass
 
     return jsonify({"status": "ok", "radius_m": radius_m, "categories": categories_out, "poi_loaded": True})
+
+
+# --------------------------------------------------------------------------
+# Иконки POI-категорий (маркеры внутри панорамного оверлея)
+# --------------------------------------------------------------------------
+
+# key = category_key (совпадает с POI_CATEGORIES выше), value = имя файла
+# в папке markers/. Категории без записи здесь остаются с дефолтной точкой.
+POI_CATEGORY_ICONS = {
+    "school": "school.png",
+    "atm": "atm.png",
+    "cafe": "cafes.png",
+    "groceries": "groceries.png",
+    "daycare": "kindergarten.png",
+    "pharmacy": "pharmacy.png",
+    "pvz": "pvz.png",
+    "restaurants": "restaraunt.png",
+    "shopping_mall": "sc.png",
+    "gas": "gas.png",   # иконки пока нет
+    "sport": "sport.png" # иконки пока нет
+}
+
+
+@app.route("/markers/<path:filename>")
+def marker_icon(filename):
+    """Отдаёт PNG-иконки категорий из папки markers/ в корне проекта."""
+    return send_from_directory(MARKERS_DIR, filename)
+
+
+@app.route("/api/poi-icons", methods=["GET"])
+def poi_icons():
+    """category_key -> URL иконки, только для категорий с реальным файлом на диске."""
+    icons = {}
+    for key, filename in POI_CATEGORY_ICONS.items():
+        if os.path.exists(os.path.join(MARKERS_DIR, filename)):
+            icons[key] = f"/markers/{filename}"
+    return jsonify(icons)
 
 
 # --------------------------------------------------------------------------
