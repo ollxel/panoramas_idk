@@ -461,13 +461,24 @@
       marker.style.padding = "0";
       marker.style.cursor = "pointer";
       marker.dataset.index = index;
+
       const iconUrl = poiCategoryIcons[item.category];
+      const titleHtml = escapeHtml(item.title);
+      const distM = item.dist_m != null && item.dist_m !== "" ? `${escapeHtml(String(item.dist_m))}м` : "";
+
+      // Метраж показываем сразу под маркером, без наведения.
+      const tooltipHtml = `
+        <span class="pano-poi-tooltip">${titleHtml}</span>
+        <span class="pano-poi-distance-always">${distM}</span>
+      `;
+
       if (iconUrl) {
         marker.classList.add("pano-poi-marker--icon");
-        marker.innerHTML = `<img class="pano-poi-icon" src="${iconUrl}" alt="" /><span class="pano-poi-tooltip">${escapeHtml(item.title)}</span>`;
+        marker.innerHTML = `<img class="pano-poi-icon" src="${iconUrl}" alt="" />${tooltipHtml}`;
       } else {
-        marker.innerHTML = `<span class="pano-poi-dot"></span><span class="pano-poi-tooltip">${escapeHtml(item.title)}</span>`;
+        marker.innerHTML = `<span class="pano-poi-dot"></span>${tooltipHtml}`;
       }
+
       marker.addEventListener("click", () => {
         if (item.bearing != null) {
           focusPoiYaw(item.bearing);
@@ -548,15 +559,7 @@
         ? "translate(-50%, -100%)"
         : "translateX(-50%)";
 
-      // Метраж под названием (как справа в сводке)
-      // item.dist_m — расстояние в метрах от текущей точки/камеры.
-      if (item.dist_m != null && item.dist_m !== "") {
-        const tooltipEl = marker.querySelector(".pano-poi-tooltip");
-        if (tooltipEl) {
-          const title = item.title ? escapeHtml(item.title) : "";
-          tooltipEl.innerHTML = `${title}<br/><span class="pano-poi-distance">${escapeHtml(String(item.dist_m))}м</span>`;
-        }
-      }
+      // метраж теперь рисуется сразу под маркером в renderPoiOverlay()
     });
   }
 
