@@ -4,7 +4,7 @@
 
 ![](screen1.png)
 
-A Flask application featuring an OpenStreetMap (Leaflet) map where an administrator can place points (stored in SQLite and visible to all visitors). When a user clicks on a point, the server downloads the corresponding Yandex Maps panorama for those coordinates and displays it in an embedded 360° viewer powered by Pannellum.
+A Flask application that combines a Leaflet/OpenStreetMap map, Yandex panorama retrieval, an experimental 3D view of OSM buildings, nearby POI summaries, and floor-plan uploads. The project is designed for exploring a place from both the map and the street level, with the ability to switch between panorama and 3D modes.
 
 ## How Panorama Retrieval Works
 
@@ -51,7 +51,7 @@ Environment variables (can be set via a `.env` file using `python-dotenv` or exp
 | `ADMIN_PASSWORD` | Administrator password | `admin123` |
 | `FLASK_SECRET_KEY` | Secret key for Flask sessions | Insecure development key |
 | `PANO_ZOOM` | Panorama zoom level | `2` |
-
+| `DISABLE_PANO_CACHE_CLEAN` | Disable automatic panorama cache cleanup on startup | `0` |
 
 ## Running
 
@@ -63,29 +63,32 @@ python3 app.py
 
 Open:
 
-http://localhost:5000
+http://localhost:8080
 
 ![](screen2.png)
 
-
 ## Usage
 
-- **Visitor:** Can view all saved points on the map. Clicking a point opens the panorama (if Yandex provides one nearby).
-- **Administrator:** Click **"Administrator Login"**, enter the password specified in `ADMIN_PASSWORD`, and the **"Add Point"** mode becomes available. Clicking on the map opens a form where you can enter a title, description, and preview the panorama for that location. Saved points become visible to all visitors.
+- **Visitor:** Can browse the map, view saved points, and open a panorama or an experimental 3D OSM scene for a location.
+- **Administrator:** Use the login panel, enter the password from `ADMIN_PASSWORD`, and then add or delete points. The interface can also show nearby POI summaries and load floor-plan images for buildings.
 
 ## Project Structure
 
 ```text
 panorama-app/
-├── app.py                      # Flask backend: points (CRUD), sessions, /api/panorama
+├── app.py                      # Flask backend: points, sessions, panorama API, POI summary API
+├── osm_buildings.py            # OSM buildings, roads, trees, water, plans, and 3D data API
+├── poi_parser.py               # Fast POI parser based on Overpass queries
 ├── pano_downloader.py          # Panorama downloading and stitching
 ├── results_8cat_tyumen_v88.csv # Source POI dataset
 ├── requirements.txt
 ├── points.db                   # Automatically created SQLite database
+├── markers/                    # POI marker icons
+├── plans/                      # Uploaded floor-plan images
 ├── templates/
 │   └── index.html
 └── static/
-    ├── css/style.css
-    ├── js/map.js
+    ├── css/
+    ├── js/
     └── panoramas/              # Cache of generated panorama JPEGs
 ```
