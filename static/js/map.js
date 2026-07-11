@@ -75,6 +75,9 @@
   const centerAttr = appEl.dataset.mapCenter || "57.1509,65.5273";
   const [centerLat, centerLon] = centerAttr.split(",").map((v) => parseFloat(v.trim()));
   const map = L.map("map").setView([centerLat, centerLon], 11);
+  // Убираем только брендовый префикс Leaflet (с флагом), но сохраняем
+  // обязательную атрибуцию источника картографических данных OSM.
+  map.attributionControl.setPrefix(false);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(map);
 
   const markers = new Map();
@@ -417,7 +420,7 @@
       }
 
       const el=document.getElementById("view-panorama"); el.innerHTML="";
-      const ar=new window.AeroRenderer(el,{bg:0x87CEEB,ground:0x5a7247,fov:75});
+      const ar=new window.AeroRenderer(el,{bg:0x87CEEB,ground:0x73787b,fov:75});
       if(!ar.init()){if(st){st.textContent="WebGL не поддерживается";st.classList.remove("hidden");}if(ld)ld.classList.add("hidden");return;}
       ar.load(buildData,camX,camZ); ar.start(); aeroRen=ar;
       if(ld)ld.classList.add("hidden");if(st)st.classList.add("hidden");

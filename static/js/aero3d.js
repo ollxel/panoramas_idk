@@ -8,8 +8,8 @@
 class AeroRenderer{
   constructor(el,opts){
     this.el=el;
-    this.o=Object.assign({bg:0x87CEEB,ground:0x5a7247,fov:75},opts||{});
-    this.scene=this.cam=this.ren=this.group=this.roadGroup=this.treeGroup=this.waterGroup=this.ground=null;
+    this.o=Object.assign({bg:0x87CEEB,ground:0x73787b,fov:75},opts||{});
+    this.scene=this.cam=this.ren=this.group=this.roadGroup=this.roadMarkingGroup=this.greenGroup=this.treeGroup=this.waterGroup=this.ground=null;
     this.raf=null; this.dead=false;
     this.yaw=0; this.pitch=-20;
     this._dragging=false; this._lastMX=0; this._lastMY=0;
@@ -22,6 +22,17 @@ class AeroRenderer{
     this._raycaster=null;
     this._mouse=new THREE.Vector2();
     this.onBuildingClick=null;
+  }
+
+  _osmShape(ring){
+    // ShapeGeometry/ExtrudeGeometry лежат в XY, а сцена — в XZ. После
+    // rotateX(-PI/2) координата shape.y становится -world.z, поэтому знак
+    // компенсируется здесь один раз для зданий, парков и воды.
+    var shape=new this.T.Shape();
+    shape.moveTo(ring[0][0],-ring[0][1]);
+    for(var i=1;i<ring.length;i++)shape.lineTo(ring[i][0],-ring[i][1]);
+    shape.closePath();
+    return shape;
   }
 
   init(){
@@ -114,44 +125,122 @@ class AeroRenderer{
   }
 
   load(data, camX, camZ, camY){
-    var T=this.T, blds=data.buildings||[], rds=data.roads||[], trs=data.trees||[], wtrs=data.waters||[], r=data.radius_m||500;
+    var T=this.T, blds=data.buildings||[], rds=data.roads||[], trs=data.trees||[], grns=data.greens||[], wtrs=data.waters||[], r=data.radius_m||500;
     camX=camX||0; camZ=camZ||0;
     this._buildings=blds;
     this._buildingMeshes=[];
     this._plans=data.plans||[];
 
-    // Земля
+    // Нейтральная городская подложка: бетон/асфальт вместо сплошной травы.
     if(this.ground){this.scene.remove(this.ground);this.ground.geometry.dispose();this.ground.material.dispose();}
     var sz=Math.max(r*3,3000);
-    this.ground=new T.Mesh(new T.PlaneGeometry(sz,sz),new T.MeshStandardMaterial({color:this.o.ground,roughness:0.95}));
+    this.ground=new T.Mesh(new T.PlaneGeometry(sz,sz),new T.MeshStandardMaterial({color:this.o.ground,roughness:1.0,metalness:0.0}));
     this.ground.rotation.x=-Math.PI/2;this.ground.position.y=-0.05;this.ground.receiveShadow=true;this.scene.add(this.ground);
 
-    // Дороги
+    // Зелёная поверхность рисуется только для forest / wood / park из OSM.
+    if(this.greenGroup){this.scene.remove(this.greenGroup);this.greenGroup.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();});}
+    this.greenGroup=new T.Group();
+    var greenMat=new T.MeshStandardMaterial({color:0x55734c,roughness:1.0,side:T.DoubleSide});
+    for(var gi=0;gi<grns.length&&gi<600;gi++){
+      var greenRing=grns[gi];if(!greenRing||greenRing.length<3)continue;
+      try{
+        var greenShape=this._osmShape(greenRing);
+        var greenGeo=new T.ShapeGeometry(greenShape);greenGeo.rotateX(-Math.PI/2);
+        var greenMesh=new T.Mesh(greenGeo,greenMat);greenMesh.position.y=0;greenMesh.receiveShadow=true;
+        this.greenGroup.add(greenMesh);
+      }catch(e){}
+    }
+    this.scene.add(this.greenGroup);
+
+    // Дороги: low-poly ленты с аккуратными стыками и одной общей геометрией разметки.
     if(this.roadGroup){this.scene.remove(this.roadGroup);this.roadGroup.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();});}
+    if(this.roadMarkingGroup){this.scene.remove(this.roadMarkingGroup);this.roadMarkingGroup.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();});}
     this.roadGroup=new T.Group();
+    this.roadMarkingGroup=new T.Group();
+    var markingVerts=[],markingIdx=[],markingVertexLimit=120000;
+
+    function appendMarkQuad(x1,z1,x2,z2,lineWidth){
+      if(markingVerts.length/3+4>markingVertexLimit)return;
+      var dx=x2-x1,dz=z2-z1,len=Math.sqrt(dx*dx+dz*dz);if(len<0.02)return;
+      var nx=-dz/len*lineWidth*0.5,nz=dx/len*lineWidth*0.5,base=markingVerts.length/3;
+      markingVerts.push(x1+nx,0.065,z1+nz,x1-nx,0.065,z1-nz,x2+nx,0.065,z2+nz,x2-nx,0.065,z2-nz);
+      markingIdx.push(base,base+1,base+2,base+1,base+3,base+2);
+    }
+    function appendDashedLine(path,offset){
+      var travelled=0,dash=5,gap=4,cycle=dash+gap;
+      for(var si=0;si<path.length-1;si++){
+        var a=path[si],b=path[si+1],dx=b[0]-a[0],dz=b[1]-a[1],len=Math.sqrt(dx*dx+dz*dz);if(len<0.02)continue;
+        var ux=dx/len,uz=dz/len,nx=-uz,nz=ux,local=0;
+        while(local<len&&markingVerts.length/3<markingVertexLimit){
+          var phase=(travelled+local)%cycle;
+          var painted=phase<dash;
+          var step=Math.min((painted?dash:cycle)-phase,len-local);
+          if(step<0.001)step=Math.min(0.01,len-local);
+          if(painted){
+            appendMarkQuad(a[0]+ux*local+nx*offset,a[1]+uz*local+nz*offset,a[0]+ux*(local+step)+nx*offset,a[1]+uz*(local+step)+nz*offset,0.14);
+          }
+          local+=step;
+        }
+        travelled+=len;
+      }
+    }
+    function appendSolidLine(path,offset){
+      for(var si=0;si<path.length-1;si++){
+        var a=path[si],b=path[si+1],dx=b[0]-a[0],dz=b[1]-a[1],len=Math.sqrt(dx*dx+dz*dz);if(len<0.02)continue;
+        var nx=-dz/len,nz=dx/len;
+        appendMarkQuad(a[0]+nx*offset,a[1]+nz*offset,b[0]+nx*offset,b[1]+nz*offset,0.12);
+      }
+    }
+    function stripOffset(path,index,halfWidth,side){
+      var prev=index>0?path[index-1]:path[index],next=index<path.length-1?path[index+1]:path[index];
+      var dx1=path[index][0]-prev[0],dz1=path[index][1]-prev[1],l1=Math.sqrt(dx1*dx1+dz1*dz1);
+      var dx2=next[0]-path[index][0],dz2=next[1]-path[index][1],l2=Math.sqrt(dx2*dx2+dz2*dz2);
+      if(l1<0.001){dx1=dx2;dz1=dz2;l1=l2||1;}if(l2<0.001){dx2=dx1;dz2=dz1;l2=l1||1;}
+      var n1x=-dz1/l1,n1z=dx1/l1,n2x=-dz2/l2,n2z=dx2/l2;
+      var mx=n1x+n2x,mz=n1z+n2z,ml=Math.sqrt(mx*mx+mz*mz);
+      if(ml<0.001){mx=n2x;mz=n2z;ml=1;}
+      mx/=ml;mz/=ml;
+      var denom=Math.max(0.55,Math.abs(mx*n2x+mz*n2z));
+      var scale=Math.min(halfWidth*1.8,halfWidth/denom)*side;
+      return [path[index][0]+mx*scale,path[index][1]+mz*scale];
+    }
+
     for(var ri=0;ri<rds.length;ri++){
-      var rd=rds[ri]; if(rd.path.length<2)continue;
-      var halfW=rd.width*0.5;
-      var verts=[],idxs=[];
+      var rd=rds[ri];if(!rd.path||rd.path.length<2)continue;
+      var halfW=Number(rd.width||4)*0.5,verts=[],idxs=[];
       for(var pi=0;pi<rd.path.length;pi++){
-        var p0=rd.path[pi]; var nx=0,nz=1;
-        if(pi<rd.path.length-1){var p1=rd.path[pi+1];var dx=p1[0]-p0[0],dz=p1[1]-p0[1];var len=Math.sqrt(dx*dx+dz*dz)||1;nx=-dz/len;nz=dx/len;}
-        else if(pi>0){var pm=rd.path[pi-1];var dx2=p0[0]-pm[0],dz2=p0[1]-pm[1];var len2=Math.sqrt(dx2*dx2+dz2*dz2)||1;nx=-dz2/len2;nz=dx2/len2;}
-        verts.push(p0[0]+nx*halfW,0.03,p0[1]+nz*halfW);
-        verts.push(p0[0]-nx*halfW,0.03,p0[1]-nz*halfW);
+        var left=stripOffset(rd.path,pi,halfW,1),right=stripOffset(rd.path,pi,halfW,-1);
+        verts.push(left[0],0.03,left[1],right[0],0.03,right[1]);
         if(pi>0){var bi=(pi-1)*2;idxs.push(bi,bi+1,bi+2,bi+1,bi+3,bi+2);}
       }
       var geo=new T.BufferGeometry();geo.setAttribute("position",new T.Float32BufferAttribute(verts,3));geo.setIndex(idxs);geo.computeVertexNormals();
-      var mat=new T.MeshStandardMaterial({color:new T.Color(rd.color),roughness:0.9,side:T.DoubleSide});
+      var mat=new T.MeshStandardMaterial({color:new T.Color(rd.color||"#4b5053"),roughness:0.96,metalness:0.0,side:T.DoubleSide});
       var mesh=new T.Mesh(geo,mat);mesh.receiveShadow=true;this.roadGroup.add(mesh);
+
+      var lanes=Math.max(1,Math.min(8,Math.round(Number(rd.lanes)||1)));
+      if(rd.markings&&lanes>=2){
+        var laneWidth=Number(rd.width||4)/lanes;
+        for(var li=1;li<lanes;li++)appendDashedLine(rd.path,-halfW+laneWidth*li);
+      }
+      if(rd.edge_lines){
+        appendSolidLine(rd.path,Math.max(0,halfW-0.3));
+        appendSolidLine(rd.path,-Math.max(0,halfW-0.3));
+      }
     }
     this.scene.add(this.roadGroup);
+    if(markingVerts.length){
+      var markingGeo=new T.BufferGeometry();markingGeo.setAttribute("position",new T.Float32BufferAttribute(markingVerts,3));markingGeo.setIndex(markingIdx);markingGeo.computeVertexNormals();
+      var markingMat=new T.MeshStandardMaterial({color:0xf4f1df,roughness:0.8,metalness:0.0,side:T.DoubleSide});
+      var markingMesh=new T.Mesh(markingGeo,markingMat);markingMesh.receiveShadow=true;markingMesh.renderOrder=3;
+      this.roadMarkingGroup.add(markingMesh);
+    }
+    this.scene.add(this.roadMarkingGroup);
 
     // Водоёмы
     if(this.waterGroup){this.scene.remove(this.waterGroup);this.waterGroup.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();});}
     this.waterGroup=new T.Group();
     var waterMat=new T.MeshStandardMaterial({color:0x4a90d9,roughness:0.3,metalness:0.1,transparent:true,opacity:0.85,side:T.DoubleSide});
-    for(var wi=0;wi<wtrs.length;wi++){var wr=wtrs[wi];if(wr.length<3)continue;try{var wShape=new T.Shape();wShape.moveTo(wr[0][0],wr[0][1]);for(var wj=1;wj<wr.length;wj++)wShape.lineTo(wr[wj][0],wr[wj][1]);wShape.closePath();var wGeo=new T.ShapeGeometry(wShape);wGeo.rotateX(-Math.PI/2);var wMesh=new T.Mesh(wGeo,waterMat);wMesh.position.y=0.01;this.waterGroup.add(wMesh);}catch(e){}}
+    for(var wi=0;wi<wtrs.length;wi++){var wr=wtrs[wi];if(wr.length<3)continue;try{var wShape=this._osmShape(wr);var wGeo=new T.ShapeGeometry(wShape);wGeo.rotateX(-Math.PI/2);var wMesh=new T.Mesh(wGeo,waterMat);wMesh.position.y=0.01;this.waterGroup.add(wMesh);}catch(e){}}
     this.scene.add(this.waterGroup);
 
     // Здания + планы на крышах
@@ -160,8 +249,7 @@ class AeroRenderer{
     for(var i=0;i<blds.length&&cnt<3000;i++){
       var b=blds[i],ring=b.ring,h=b.height; if(!ring||ring.length<3||!h)continue;
       try{
-        var sh=new T.Shape();sh.moveTo(ring[0][0],ring[0][1]);
-        for(var j=1;j<ring.length;j++)sh.lineTo(ring[j][0],ring[j][1]);sh.closePath();
+        var sh=this._osmShape(ring);
         var ext=new T.ExtrudeGeometry(sh,{depth:h,bevelEnabled:false});ext.rotateX(-Math.PI/2);
         var col=new T.Color(b.color);
         var w=new T.Mesh(ext,new T.MeshStandardMaterial({color:col,roughness:0.7,metalness:0.05}));
@@ -230,7 +318,7 @@ class AeroRenderer{
   _resize(){if(this.dead)return;var w=this.el.clientWidth,h=this.el.clientHeight;this.cam.aspect=w/Math.max(1,h);this.cam.updateProjectionMatrix();this.ren.setSize(w,h);}
   destroy(){
     this.dead=true;if(this.raf)cancelAnimationFrame(this.raf);window.removeEventListener("resize",this._resize);
-    [this.group,this.roadGroup,this.treeGroup,this.waterGroup].forEach(function(g){if(g){this.scene.remove(g);g.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)(Array.isArray(c.material)?c.material:[c.material]).forEach(function(m){m.dispose();});});}}.bind(this));
+    [this.group,this.roadGroup,this.roadMarkingGroup,this.greenGroup,this.treeGroup,this.waterGroup].forEach(function(g){if(g){this.scene.remove(g);g.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)(Array.isArray(c.material)?c.material:[c.material]).forEach(function(m){m.dispose();});});}}.bind(this));
     if(this.ground){this.scene.remove(this.ground);this.ground.geometry.dispose();this.ground.material.dispose();}
     if(this.ren){this.ren.dispose();if(this.ren.domElement.parentNode)this.ren.domElement.parentNode.removeChild(this.ren.domElement);}
     this.scene=this.cam=this.ren=null;

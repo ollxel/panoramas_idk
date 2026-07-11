@@ -1,7 +1,14 @@
 """
 osm_buildings.py — OSM здания + дороги + деревья + водоёмы + планы + Flask endpoint
 """
-import math, os, random, time, uuid, requests
+import math
+import os
+import random
+import re
+import time
+import uuid
+
+import requests
 from flask import Blueprint, jsonify, request, send_from_directory
 
 osm_bp = Blueprint("osm_buildings", __name__)
@@ -43,17 +50,83 @@ def _height(tags, btype):
         except: pass
     return DEFAULT_HEIGHTS.get(btype, 8)
 
+ROAD_DEFAULT_LANES = {
+    "motorway": 4,
+    "motorway_link": 1,
+    "trunk": 3,
+    "trunk_link": 1,
+    "primary": 2,
+    "primary_link": 1,
+    "secondary": 2,
+    "secondary_link": 1,
+    "tertiary": 2,
+    "tertiary_link": 1,
+    "unclassified": 2,
+    "residential": 2,
+    "service": 1,
+    "living_street": 1,
+}
+DRIVABLE_ROADS = set(ROAD_DEFAULT_LANES)
+MARKED_ROADS = {
+    "motorway", "motorway_link", "trunk", "trunk_link", "primary",
+    "primary_link", "secondary", "secondary_link", "tertiary",
+    "tertiary_link", "unclassified", "residential",
+}
+
+
+def _number_from_tag(value):
+    """Возвращает первое число из OSM-тега вроде ``"6.5 m"``."""
+    match = re.search(r"[-+]?\d+(?:[.,]\d+)?", str(value or ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(0).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _road_lanes(tags, htype):
+    value = _number_from_tag(tags.get("lanes"))
+    if value is not None:
+        return max(1, min(8, int(round(value))))
+    return ROAD_DEFAULT_LANES.get(htype, 1)
+
+
 def _road_width(tags, htype):
-    lanes = tags.get("lanes","")
-    if lanes:
-        try: return max(3, float(lanes)*3.5)
-        except: pass
-    widths = {"motorway":14,"trunk":10,"primary":8,"secondary":7,"tertiary":6,"residential":5,"service":3,"unclassified":5,"living_street":4,"footway":1.5,"path":1,"cycleway":2,"pedestrian":3,"steps":1.5,"track":3}
+    explicit_width = _number_from_tag(tags.get("width"))
+    if explicit_width is not None:
+        return max(1.0, min(30.0, explicit_width))
+
+    lanes = _number_from_tag(tags.get("lanes"))
+    if lanes is not None:
+        # 3.2 м достаточно для читаемой полосы, но не раздувает дорогу до домов.
+        return max(3.0, min(30.0, lanes * 3.2))
+
+    widths = {
+        "motorway": 14, "motorway_link": 7, "trunk": 10, "trunk_link": 6.5,
+        "primary": 8, "primary_link": 6, "secondary": 7, "secondary_link": 5.5,
+        "tertiary": 6, "tertiary_link": 4.5, "residential": 5.5, "service": 3.2,
+        "unclassified": 5.5, "living_street": 4, "footway": 1.5,
+        "path": 1, "cycleway": 2, "pedestrian": 3, "steps": 1.5,
+        "track": 3,
+    }
     return widths.get(htype, 4)
 
+
 def _road_color(htype):
-    colors = {"motorway":"#e892a2","trunk":"#f9b29c","primary":"#fcd6a4","secondary":"#f7fabf","tertiary":"#ffffff","residential":"#ffffff","service":"#eeeeee","unclassified":"#ffffff","living_street":"#ffe8e8","footway":"#999999","path":"#aaaaaa","cycleway":"#6699ff","pedestrian":"#cccccc","steps":"#888888","track":"#c8a882"}
-    return colors.get(htype, "#cccccc")
+    """Приглушённая low-poly палитра асфальта и бетона."""
+    colors = {
+        "motorway": "#353a3e", "motorway_link": "#373c40",
+        "trunk": "#393e42", "trunk_link": "#3b4044",
+        "primary": "#3d4246", "primary_link": "#404549",
+        "secondary": "#42474b", "secondary_link": "#44494c",
+        "tertiary": "#464b4e", "tertiary_link": "#484d50",
+        "residential": "#4b5053", "service": "#555a5d",
+        "unclassified": "#4c5154", "living_street": "#5d6163",
+        "footway": "#777b7d", "path": "#74787a", "cycleway": "#666d70",
+        "pedestrian": "#808385", "steps": "#6b6f72", "track": "#696d6e",
+    }
+    return colors.get(htype, "#5c6062")
 
 def _pt_in_poly(px, py, poly):
     n = len(poly); inside = False; j = n - 1
@@ -84,6 +157,123 @@ def _polygon_area(poly):
     return abs(area) / 2.0
 
 
+def _polygon_centroid(poly):
+    """Центроид площади; для вырожденного контура — среднее вершин."""
+    if not poly:
+        return 0.0, 0.0
+    twice_area = 0.0
+    cx = cy = 0.0
+    for i in range(len(poly)):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % len(poly)]
+        cross = x1 * y2 - x2 * y1
+        twice_area += cross
+        cx += (x1 + x2) * cross
+        cy += (y1 + y2) * cross
+    if abs(twice_area) < 1e-8:
+        return (
+            sum(p[0] for p in poly) / len(poly),
+            sum(p[1] for p in poly) / len(poly),
+        )
+    return cx / (3.0 * twice_area), cy / (3.0 * twice_area)
+
+
+def _nearest_point_on_segment(px, py, ax, ay, bx, by):
+    dx, dy = bx - ax, by - ay
+    denom = dx * dx + dy * dy
+    if denom <= 1e-12:
+        return ax, ay, math.hypot(px - ax, py - ay), 0.0
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / denom))
+    qx, qy = ax + t * dx, ay + t * dy
+    return qx, qy, math.hypot(px - qx, py - qy), t
+
+
+def _orientation(ax, ay, bx, by, cx, cy):
+    return (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+
+def _on_segment(ax, ay, bx, by, px, py, eps=1e-7):
+    return (
+        min(ax, bx) - eps <= px <= max(ax, bx) + eps
+        and min(ay, by) - eps <= py <= max(ay, by) + eps
+        and abs(_orientation(ax, ay, bx, by, px, py)) <= eps
+    )
+
+
+def _segments_intersect(a, b, c, d, eps=1e-7):
+    o1 = _orientation(a[0], a[1], b[0], b[1], c[0], c[1])
+    o2 = _orientation(a[0], a[1], b[0], b[1], d[0], d[1])
+    o3 = _orientation(c[0], c[1], d[0], d[1], a[0], a[1])
+    o4 = _orientation(c[0], c[1], d[0], d[1], b[0], b[1])
+    if ((o1 > eps and o2 < -eps) or (o1 < -eps and o2 > eps)) and (
+        (o3 > eps and o4 < -eps) or (o3 < -eps and o4 > eps)
+    ):
+        return True
+    return (
+        (abs(o1) <= eps and _on_segment(a[0], a[1], b[0], b[1], c[0], c[1]))
+        or (abs(o2) <= eps and _on_segment(a[0], a[1], b[0], b[1], d[0], d[1]))
+        or (abs(o3) <= eps and _on_segment(c[0], c[1], d[0], d[1], a[0], a[1]))
+        or (abs(o4) <= eps and _on_segment(c[0], c[1], d[0], d[1], b[0], b[1]))
+    )
+
+
+def _segment_intersects_polygon(a, b, poly):
+    if _pt_in_poly(a[0], a[1], poly) or _pt_in_poly(b[0], b[1], poly):
+        return True
+    return any(
+        _segments_intersect(a, b, poly[i], poly[(i + 1) % len(poly)])
+        for i in range(len(poly))
+    )
+
+
+def _building_hits_road(ring, roads):
+    """Отбрасывает только явные пересечения с проезжей частью."""
+    cx, cy = _polygon_centroid(ring)
+    for road in roads:
+        if road.get("type") not in DRIVABLE_ROADS or not road.get("collision", True):
+            continue
+        path = road.get("path") or []
+        width = float(road.get("width", 4.0))
+        core_half_width = max(0.8, width * 0.42)
+        vertices_in_core = 0
+        min_center_distance = float("inf")
+
+        for i in range(len(path) - 1):
+            a, b = path[i], path[i + 1]
+            if _segment_intersects_polygon(a, b, ring):
+                return True
+            _, _, center_distance, _ = _nearest_point_on_segment(
+                cx, cy, a[0], a[1], b[0], b[1]
+            )
+            min_center_distance = min(min_center_distance, center_distance)
+
+        for px, py in ring:
+            min_vertex_distance = min(
+                (_pt_seg_dist(px, py, path[i][0], path[i][1], path[i + 1][0], path[i + 1][1])
+                 for i in range(len(path) - 1)),
+                default=float("inf"),
+            )
+            if min_vertex_distance <= core_half_width:
+                vertices_in_core += 1
+
+        if min_center_distance <= width * 0.36:
+            return True
+        if vertices_in_core >= max(2, int(math.ceil(len(ring) * 0.3))):
+            return True
+    return False
+
+
+def _postprocess_buildings(buildings, roads):
+    """
+    Сохраняет исходные OSM-footprint'ы без поворотов и смещений. Удаляются
+    только явные конфликты, где проезжая часть действительно пересекает дом.
+
+    Важно: прежнее «выравнивание» было ошибочным — OSM уже содержит правильный
+    угол здания, а визуальный хаос создавал зеркальный Y/Z transform в Three.js.
+    """
+    return [b for b in buildings if not _building_hits_road(b["ring"], roads)]
+
+
 def _tree_too_close_to_buildings(cx, cy, building_rings, crown_radius=4.0):
     clearance = max(2.0, crown_radius + 1.5)
     for ring in building_rings or []:
@@ -105,13 +295,12 @@ def _tree_too_close_to_buildings(cx, cy, building_rings, crown_radius=4.0):
 
 
 def _is_green(tags):
-    if tags.get("landuse") in ("forest","grass","meadow","village_green","recreation_ground"):
-        return True
-    if tags.get("leisure") in ("park","garden","recreation_ground"):
-        return True
-    if tags.get("natural") in ("wood","grassland","scrub"):
-        return True
-    return False
+    """Зелёная подложка только там, где OSM явно говорит «лес» или «парк»."""
+    return (
+        tags.get("landuse") == "forest"
+        or tags.get("leisure") == "park"
+        or tags.get("natural") == "wood"
+    )
 
 def _is_water(tags):
     if tags.get("natural") == "water": return True
@@ -171,8 +360,9 @@ def _make_trees_in_parks(park_polys, building_rings=None):
                 candidates.append((cx, cy))
 
         rng.shuffle(candidates)
+        added_for_park = 0
         for cx, cy in candidates:
-            if len(trees) >= GLOBAL_MAX or len(trees) >= target_count:
+            if len(trees) >= GLOBAL_MAX or added_for_park >= target_count:
                 break
             crown_radius = 3.5 + rng.uniform(0.0, 2.0)
             if _tree_too_close_to_buildings(cx, cy, building_rings, crown_radius):
@@ -186,6 +376,7 @@ def _make_trees_in_parks(park_polys, building_rings=None):
             if ok:
                 existing.add((gx, gy))
                 trees.append({'x': round(cx, 1), 'y': round(cy, 1)})
+                added_for_park += 1
 
     return trees
 
@@ -244,10 +435,7 @@ def _query(lat, lon, radius_m, timeout=45):
         f'way["building"]({bbox});' \
         f'way["highway"]({bbox});' \
         f'way["landuse"="forest"]({bbox});way["leisure"="park"]({bbox});' \
-        f'way["leisure"="garden"]({bbox});way["leisure"="recreation_ground"]({bbox});' \
-        f'way["natural"="wood"]({bbox});way["natural"="grassland"]({bbox});way["natural"="scrub"]({bbox});' \
-        f'way["landuse"="grass"]({bbox});way["landuse"="meadow"]({bbox});' \
-        f'way["landuse"="village_green"]({bbox});way["landuse"="recreation_ground"]({bbox});' \
+        f'way["natural"="wood"]({bbox});' \
         f'way["natural"="water"]({bbox});way["water"]({bbox});' \
         f'way["landuse"="reservoir"]({bbox});way["waterway"="riverbank"]({bbox});' \
         f'node["natural"="tree"]({bbox});' \
@@ -288,9 +476,7 @@ def _query(lat, lon, radius_m, timeout=45):
         if btype and btype != "no":
             if ring[0] == ring[-1]: ring = ring[:-1]
             if len(ring) < 3: continue
-            cx = sum(p[0] for p in ring) / len(ring)
-            cy = sum(p[1] for p in ring) / len(ring)
-            building_rings.append(ring)
+            cx, cy = _polygon_centroid(ring)
             buildings.append({
                 "ring": ring, "height": round(_height(tags, btype), 1),
                 "color": COLORS.get(btype, COLORS["default"]),
@@ -302,12 +488,44 @@ def _query(lat, lon, radius_m, timeout=45):
             continue
         htype = tags.get("highway", "")
         if htype:
-            roads.append({"path": ring, "width": _road_width(tags, htype), "color": _road_color(htype), "type": htype})
+            lanes = _road_lanes(tags, htype)
+            surface = tags.get("surface", "")
+            unpaved = surface in {"unpaved", "gravel", "fine_gravel", "dirt", "earth", "ground", "sand"}
+            layer = _number_from_tag(tags.get("layer")) or 0
+            roads.append({
+                "path": ring,
+                "width": round(_road_width(tags, htype), 1),
+                "color": _road_color(htype),
+                "type": htype,
+                "lanes": lanes,
+                "oneway": tags.get("oneway") in {"yes", "1", "true"} or htype == "motorway",
+                "markings": (
+                    htype in MARKED_ROADS
+                    and lanes >= 2
+                    and not unpaved
+                    and tags.get("lane_markings") != "no"
+                ),
+                "edge_lines": htype in {
+                    "motorway", "motorway_link", "trunk", "trunk_link", "primary",
+                } and not unpaved,
+                "surface": surface,
+                # Дороги в тоннеле/под зданием не должны удалять footprint сверху.
+                "collision": not (
+                    tags.get("tunnel") not in {None, "", "no"}
+                    or tags.get("covered") == "yes"
+                    or layer < 0
+                ),
+            })
             continue
         if _is_green(tags):
             park_polys.append(ring); continue
         if _is_water(tags):
             waters.append(ring)
+
+    # После полного парсинга известны все улицы: убираем только явные
+    # OSM-конфликты. Сами footprint'ы не поворачиваем — их ориентация уже точная.
+    buildings = _postprocess_buildings(buildings, roads)
+    building_rings = [b["ring"] for b in buildings]
 
     if building_rings:
         trees = [t for t in trees if not _tree_too_close_to_buildings(t['x'], t['y'], building_rings, 4.0)]
@@ -326,8 +544,7 @@ def _query(lat, lon, radius_m, timeout=45):
     plans = _load_plans()
     for b in buildings:
         b["plan"] = None
-        cx = sum(p[0] for p in b["ring"]) / len(b["ring"])
-        cy = sum(p[1] for p in b["ring"]) / len(b["ring"])
+        cx, cy = _polygon_centroid(b["ring"])
         # Переводим обратно в lat/lon для сравнения с plans.txt
         b_lat = lat + cy / 111320.0
         b_lon = lon + cx / (111320.0 * math.cos(math.radians(lat)))
@@ -336,7 +553,15 @@ def _query(lat, lon, radius_m, timeout=45):
                 b["plan"] = p["filename"]
                 break
 
-    return {"buildings": buildings, "roads": roads, "trees": trees, "waters": waters, "count": len(buildings), "radius_m": radius_m}
+    return {
+        "buildings": buildings,
+        "roads": roads,
+        "trees": trees,
+        "greens": park_polys,
+        "waters": waters,
+        "count": len(buildings),
+        "radius_m": radius_m,
+    }
 
 # ═══════════════════════════════════════════════════════════════
 # API ENDPOINTS
