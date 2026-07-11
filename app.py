@@ -72,6 +72,18 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "change-me-please")
 app.register_blueprint(osm_bp)
 
+# Разрешаем встраивание через iframe на любом сайте (для /embed)
+@app.after_request
+def allow_iframe(response):
+    # Для embed-страниц разрешаем любой frame-ancestor, для остальных - SAMEORIGIN по умолчанию браузеров
+    # Убираем X-Frame-Options если был, ставим разрешающий
+    if request.path.startswith("/embed"):
+        response.headers.pop("X-Frame-Options", None)
+        # modern CSP: allow all ancestors for embed
+        response.headers["Content-Security-Policy"] = "frame-ancestors *;"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
 # Пароль администратора (в проде — храните хэш, это упрощённый вариант)
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 
@@ -141,6 +153,26 @@ def index():
         "index.html",
         is_admin=bool(session.get("is_admin")),
     )
+
+
+@app.route("/embed")
+@app.route("/embed/3d")
+def embed_3d():
+    """Встраиваемый 3D фрейм - минимальный HTML только с AeroRenderer
+    Использование:
+      <iframe src="http://localhost:8080/embed?lat=57.15&lon=65.52&radius=300"></iframe>
+    Параметры: lat, lon, radius / radius_m, title
+    Поддерживает postMessage API: {type:'setCoords', lat, lon, radius}
+    """
+    return render_template("embed.html")
+
+
+@app.route("/test-external")
+@app.route("/demo")
+@app.route("/demo-embed")
+def test_external():
+    """Тестовая страница чужого сайта с нашим iframe внутри"""
+    return render_template("test_external.html")
 
 
 # --------------------------------------------------------------------------
@@ -370,36 +402,44 @@ def poi_summary():
         parser_data = {}
 
     for key, cat_name in POI_CATEGORIES.items():
-        items = []
-        seen_coords = set()
+        # Дедупликация по координатам: если координаты равны (округление 4 знака ~11м) - оставляем один, приоритет у БД (CSV)
+        items_by_coord = {}
 
-        # 1. Из CSV (существующие данные)
+        # 1. Из CSV (БД) - приоритет
         for poi in _poi_by_category.get(key, []):
             dist_m = _haversine_m(target_lat, target_lon, poi["lat"], poi["lon"])
-            if dist_m <= radius_m:
-                items.append({
-                    "title": poi["title"],
-                    "dist_m": round(dist_m, 1),
-                    "org_url": poi.get("org_url") or "",
-                    "lat": poi["lat"],
-                    "lon": poi["lon"],
-                })
-                seen_coords.add((round(poi["lat"], 4), round(poi["lon"], 4)))
+            if dist_m > radius_m:
+                continue
+            coord_key = (round(poi["lat"], 4), round(poi["lon"], 4))
+            if coord_key in items_by_coord:
+                # уже есть объект с такими координатами - пропускаем дубликат из БД
+                continue
+            items_by_coord[coord_key] = {
+                "title": poi["title"],
+                "dist_m": round(dist_m, 1),
+                "org_url": poi.get("org_url") or "",
+                "lat": poi["lat"],
+                "lon": poi["lon"],
+                "source": "db"
+            }
 
-        # 2. Из парсера OSM (дополняем то, чего нет в CSV)
+        # 2. Из парсера OSM - только если таких координат нет в БД
         for poi in parser_data.get(key, []):
             coord_key = (round(poi["lat"], 4), round(poi["lon"], 4))
-            if coord_key in seen_coords:
-                continue
-            seen_coords.add(coord_key)
-            items.append({
+            if coord_key in items_by_coord:
+                continue  # БД в приоритете
+            # также дедупликация внутри OSM по координатам
+            # (poi_parser уже дедуплицирует, но на всякий случай)
+            items_by_coord[coord_key] = {
                 "title": poi["title"],
                 "dist_m": poi["dist_m"],
                 "org_url": poi.get("org_url") or "",
                 "lat": poi["lat"],
                 "lon": poi["lon"],
-            })
+                "source": "osm"
+            }
 
+        items = list(items_by_coord.values())
         items.sort(key=lambda x: x["dist_m"])
         categories_out.append(
             {"key": key, "name": cat_name, "count": len(items), "items": items}
