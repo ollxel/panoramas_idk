@@ -24,6 +24,7 @@ from math import asin, cos, radians, sin, sqrt
 
 from flask import Flask, g, jsonify, render_template, request, send_from_directory, session
 
+from osm_buildings import osm_bp
 from pano_downloader import (
     DEFAULT_TILE_LIMIT,
     PanoramaLayerError,
@@ -68,6 +69,7 @@ def _maybe_clean_pano_cache() -> None:
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY", "change-me-please")
+app.register_blueprint(osm_bp)
 
 # Пароль администратора (в проде — храните хэш, это упрощённый вариант)
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
