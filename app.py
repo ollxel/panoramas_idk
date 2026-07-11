@@ -417,7 +417,7 @@ def poi_summary():
 
 
 # --------------------------------------------------------------------------
-# Иконки POI-категорий (маркеры внутри панорамного оверлея)
+# Иконки POI-категорий (маркеры внутри панорамного оверлея) + пастельные цвета
 # --------------------------------------------------------------------------
 
 # key = category_key (совпадает с POI_CATEGORIES выше), value = имя файла
@@ -432,9 +432,36 @@ POI_CATEGORY_ICONS = {
     "pvz": "pvz.png",
     "restaurants": "restaraunt.png",
     "shopping_mall": "sc.png",
-    "gas": "gas.png",   # иконки пока нет
-    "sport": "sport.png" # иконки пока нет
+    "gas": "gas.png",
+    "sport": "sport.png"
 }
+
+# Загружаем пастельные цвета из отдельного конфига marker_colors.json
+MARKER_COLORS_CONFIG_PATH = os.path.join(BASE_DIR, "marker_colors.json")
+_marker_colors_cache = None
+
+def _load_marker_colors():
+    global _marker_colors_cache
+    if _marker_colors_cache is not None:
+        return _marker_colors_cache
+    try:
+        import json
+        with open(MARKER_COLORS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        # убрать _meta
+        colors = {}
+        for k, v in raw.items():
+            if k.startswith("_"):
+                continue
+            if isinstance(v, dict) and "color" in v:
+                colors[k] = v["color"]
+            elif isinstance(v, str):
+                colors[k] = v
+        _marker_colors_cache = colors
+        return colors
+    except Exception:
+        _marker_colors_cache = {}
+        return {}
 
 
 @app.route("/markers/<path:filename>")
@@ -451,6 +478,47 @@ def poi_icons():
         if os.path.exists(os.path.join(MARKERS_DIR, filename)):
             icons[key] = f"/markers/{filename}"
     return jsonify(icons)
+
+
+@app.route("/api/marker-colors", methods=["GET"])
+def marker_colors():
+    """Отдаёт распределение цветов по категориям из отдельного конфига marker_colors.json"""
+    import json
+    try:
+        with open(MARKER_COLORS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        # убираем служебные ключи
+        out = {k: v for k, v in raw.items() if not k.startswith("_")}
+        return jsonify(out)
+    except Exception as e:
+        # fallback - цвета из кэша
+        return jsonify(_load_marker_colors())
+
+
+@app.route("/api/marker-config", methods=["GET"])
+def marker_config_combined():
+    """Комбинированный конфиг: иконка + пастельный цвет + название для каждой категории"""
+    colors = {}
+    try:
+        import json
+        with open(MARKER_COLORS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            colors = json.load(f)
+    except Exception:
+        colors = {}
+
+    combined = {}
+    for key in POI_CATEGORIES.keys():
+        icon_file = POI_CATEGORY_ICONS.get(key)
+        color_info = colors.get(key, {}) if isinstance(colors.get(key), dict) else {"color": colors.get(key, "#CCCCCC")}
+        if isinstance(color_info, str):
+            color_info = {"color": color_info}
+        combined[key] = {
+            "name": POI_CATEGORIES.get(key, key),
+            "icon": f"/markers/{icon_file}" if icon_file and os.path.exists(os.path.join(MARKERS_DIR, icon_file)) else None,
+            "color": color_info.get("color", "#CCCCCC"),
+            "file": icon_file
+        }
+    return jsonify(combined)
 
 
 # --------------------------------------------------------------------------

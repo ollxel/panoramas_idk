@@ -1,0 +1,73 @@
+{
+  "school": {
+    "name_ru": "Школы",
+    "file": "school.png",
+    "color": "#A9C4E5",
+    "description": "Пастельный приглушённый periwinkle blue - спокойный, ассоциируется с образованием"
+  },
+  "daycare": {
+    "name_ru": "Детские сады",
+    "file": "kindergarten.png",
+    "color": "#B8D9B8",
+    "description": "Пастельный sage green - мягкий зелёный для детских садов, не яркий"
+  },
+  "groceries": {
+    "name_ru": "Продукты",
+    "file": "groceries.png",
+    "color": "#E8C4A8",
+    "description": "Пастельный персиково-бежевый - тёплый, вместо агрессивного красного для магазинов"
+  },
+  "pharmacy": {
+    "name_ru": "Аптеки",
+    "file": "pharmacy.png",
+    "color": "#E8B4C2",
+    "description": "Пастельный dusty rose - нежный розовый, аптечный"
+  },
+  "atm": {
+    "name_ru": "Банкоматы",
+    "file": "atm.png",
+    "color": "#B8C5CC",
+    "description": "Пастельный slate blue-gray - нейтральный банковский, не синий радужный"
+  },
+  "gas": {
+    "name_ru": "АЗС",
+    "file": "gas.png",
+    "color": "#E9D9A8",
+    "description": "Пастельный butterscotch - приглушённый жёлтый, топливо"
+  },
+  "sport": {
+    "name_ru": "Спорт",
+    "file": "sport.png",
+    "color": "#A8D8D0",
+    "description": "Пастельный mint teal - свежий, спортивный, не чисто зелёный"
+  },
+  "cafe": {
+    "name_ru": "Кафе",
+    "file": "cafes.png",
+    "color": "#D5C4A8",
+    "description": "Пастельный latte - кофейный бежевый"
+  },
+  "restaurants": {
+    "name_ru": "Рестораны",
+    "file": "restaraunt.png",
+    "color": "#D9AFA0",
+    "description": "Пастельный terracotta clay - отличим от кафе, приглушённый коралл"
+  },
+  "pvz": {
+    "name_ru": "ПВЗ",
+    "file": "pvz.png",
+    "color": "#C7B8D8",
+    "description": "Пастельный lavender - сиреневатый для пунктов выдачи"
+  },
+  "shopping_mall": {
+    "name_ru": "Торговые центры",
+    "file": "sc.png",
+    "color": "#D0C7B8",
+    "description": "Пастельный greige taupe - нейтральный песочный для ТЦ"
+  },
+  "_meta": {
+    "palette_note": "Все цвета - пастельные, десатурированные (S <45%), светлота L ~75-85%, чтобы избежать яркой радужной палитры и случайной ассоциации с флагом. Использованы теплые/пыльные оттенки вместо чистых spectral Red/Orange/Yellow/Green/Blue/Purple.",
+    "version": "pastel_v1",
+    "avoid_lgbt_flag": true
+  }
+}

@@ -1,18 +1,19 @@
 /**
- * map.js — ТОЧНАЯ копия оригинального repo + 3D аэропанорамы
+ * map.js - FIXED: метки теперь привязываются к реальным объектам, а не висят в воздухе
  *
- * POI overlay система ВЗЯТА ЦЕЛИКОМ из оригинального map.js
- * (commit: meters-now-places-under-marker)
- *
- * Добавлено: клик по карте → 3D, toggle 3D↔panorama
+ * Что исправлено:
+ *  - Панорама: для каждой POI вычисляется реальный pitch = -atan((H_pano - H_building)/dist)
+ *    и метка проецируется на землю/фасад, а не на горизонт.
+ *  - 3D: метки проецируются через THREE.Vector3.project(cam), используя реальные
+ *    координаты зданий из OSM, и оказываются прямо на mesh'е школы/магазина и т.д.
  */
+
 (function () {
   "use strict";
 
   const appEl = document.getElementById("app");
   const isAdmin = appEl.dataset.isAdmin === "true";
 
-  // ★ 3D рендерер
   let aeroRen = null;
   let currentViewMode = "3d";
 
@@ -71,12 +72,9 @@
   if (langEnBtn) langEnBtn.addEventListener("click", () => setLang("en"));
   setLang(currentLang);
 
-  // ── Карта ──
   const centerAttr = appEl.dataset.mapCenter || "57.1509,65.5273";
   const [centerLat, centerLon] = centerAttr.split(",").map((v) => parseFloat(v.trim()));
   const map = L.map("map").setView([centerLat, centerLon], 11);
-  // Убираем только брендовый префикс Leaflet (с флагом), но сохраняем
-  // обязательную атрибуцию источника картографических данных OSM.
   map.attributionControl.setPrefix(false);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19, attribution:"© OpenStreetMap contributors" }).addTo(map);
 
@@ -91,6 +89,39 @@
     const phi1=_toRadians(lat1),phi2=_toRadians(lat2),dl=_toRadians(lon2-lon1);
     return _normalizeAngle(_toDegrees(Math.atan2(Math.sin(dl)*Math.cos(phi2),Math.cos(phi1)*Math.sin(phi2)-Math.sin(phi1)*Math.cos(phi2)*Math.cos(dl))));
   }
+  function haversineM(lat1,lon1,lat2,lon2){
+    const R=6371000;
+    const dLat=_toRadians(lat2-lat1);
+    const dLon=_toRadians(lon2-lon1);
+    const a=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(_toRadians(lat1))*Math.cos(_toRadians(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+    const c=2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+    return R*c;
+  }
+  function latLonToLocal(originLat, originLon, targetLat, targetLon){
+    const cosLat=Math.cos(_toRadians(originLat));
+    const dx=(targetLon-originLon)*111320*cosLat;
+    const dy=(targetLat-originLat)*111320;
+    return {x:dx, z:dy};
+  }
+  function getBuildingCentroidLocal(building){
+    if(!building || !building.ring || building.ring.length===0) return null;
+    let sx=0, sy=0;
+    const ring=building.ring;
+    for(let i=0;i<ring.length;i++){ sx+=ring[i][0]; sy+=ring[i][1]; }
+    return {x:sx/ring.length, z:sy/ring.length};
+  }
+  function findNearestBuilding(poiLat, poiLon, buildings, maxDist){
+    maxDist=maxDist||60;
+    let best=null, bestDist=Infinity;
+    if(!buildings || !buildings.length) return null;
+    for(let i=0;i<buildings.length;i++){
+      const b=buildings[i];
+      if(b._lat==null || b._lon==null) continue;
+      const d=haversineM(poiLat, poiLon, b._lat, b._lon);
+      if(d<bestDist && d<=maxDist){ bestDist=d; best=b; }
+    }
+    return best?{building:best, dist:bestDist}:null;
+  }
 
   function addMarker(point) { const m=L.marker([point.lat,point.lon]).addTo(map); m.bindPopup("<b>"+escapeHtml(point.title)+"</b>"); m.on("click",()=>openViewModal(point)); markers.set(point.id,m); }
   function clearAirMarkers() { airMarkers.forEach((m)=>map.removeLayer(m)); airMarkers.clear(); }
@@ -103,7 +134,6 @@
   loadPoints(); loadAirPanoMarkers();
   map.on("moveend",debounce(()=>loadAirPanoMarkers(),500));
 
-  // ★ ПОИСК (Nominatim / OSM)
   var searchInput=document.getElementById("search-input");
   var searchResults=document.getElementById("search-results");
   var searchMarker=null;
@@ -123,7 +153,7 @@
           d.results.forEach(function(item){
             var div=document.createElement("div");
             div.style.cssText="padding:8px 12px;cursor:pointer;color:#e7e9ee;font-size:13px;border-bottom:1px solid #2a2f3a";
-            div.textContent=item.name.length>60?item.name.substring(0,60)+"…":item.name;
+            div.textContent=item.name.length>60?item.name.substring(0,60)+"\u2026":item.name;
             div.addEventListener("click",function(){
               map.setView([item.lat,item.lon],16);
               if(searchMarker)map.removeLayer(searchMarker);
@@ -141,14 +171,12 @@
     document.addEventListener("click",function(e){if(!e.target.closest("#search-input")&&!e.target.closest("#search-results"))searchResults.style.display="none";});
   }
 
-  // ★ КЛИК ПО КАРТЕ → 3D
   map.on("click",function(e){if(addModeActive)return;openAt(e.latlng.lat,e.latlng.lng,"Точка "+e.latlng.lat.toFixed(5)+", "+e.latlng.lng.toFixed(5),"");});
 
-  // ── Геолокация ──
   const currentLocationBtn=document.getElementById("btn-current-location");
   if(currentLocationBtn)currentLocationBtn.addEventListener("click",()=>{
     if(!navigator.geolocation){alert("Геолокация не поддерживается.");return;}
-    currentLocationBtn.disabled=true; currentLocationBtn.textContent=currentLang==="en"?"Locating…":"Определяем…";
+    currentLocationBtn.disabled=true; currentLocationBtn.textContent=currentLang==="en"?"Locating\u2026":"Определяем\u2026";
     navigator.geolocation.getCurrentPosition(async(pos)=>{
       map.setView([pos.coords.latitude,pos.coords.longitude],16);
       currentLocationBtn.disabled=false; currentLocationBtn.textContent=currentLang==="en"?"Current location":"Текущее местоположение";
@@ -157,18 +185,20 @@
     },(err)=>{console.warn("Geolocation error:",err);alert("Не удалось.");currentLocationBtn.disabled=false;currentLocationBtn.textContent=currentLang==="en"?"Current location":"Текущее местоположение";},{enableHighAccuracy:true,timeout:10000});
   });
 
-  // ── Модалки ──
   function showModal(id){document.getElementById(id).classList.remove("hidden");}
   function hideModal(id){document.getElementById(id).classList.add("hidden");}
 
-  // ═══════════════════════════════════════════════════════════════
-  // ★ POI СИСТЕМА — ТОЧНАЯ КОПИЯ ИЗ ОРИГИНАЛЬНОГО REPO
-  // ═══════════════════════════════════════════════════════════════
+  // ─────── POI СИСТЕМА (модифицированная) ───────
 
   let currentPoiItems = [];
   let poiOverlay = null;
   let poiOverlayFrame = null;
   let poiCategoryIcons = {};
+
+  // ★ Новые глобалы для привязки к объектам
+  let lastPanoMeta = null;          // {pano_lat, pano_lon, height}
+  let lastBuildings = [];           // массив из /api/osm-buildings
+  let lastOSMOrigin = null;         // {lat,lon} - центр запроса OSM, он же origin сцены
 
   async function loadPoiCategoryIcons() {
     try { const res = await fetch("/api/poi-icons"); poiCategoryIcons = await res.json(); } catch(e) { poiCategoryIcons = {}; }
@@ -206,7 +236,7 @@
     if (!poiOverlay) return;
     poiOverlay.innerHTML = "";
     currentPoiItems.forEach((item, index) => {
-      if (item.bearing == null) return;
+      if (item.bearing == null && item.worldX == null) return;
       const marker = document.createElement("button");
       marker.type = "button";
       marker.className = "pano-poi-marker";
@@ -218,9 +248,8 @@
 
       const iconUrl = poiCategoryIcons[item.category];
       const titleHtml = escapeHtml(item.title);
-      const distM = item.dist_m != null && item.dist_m !== "" ? `${escapeHtml(String(item.dist_m))}м` : "";
+      const distM = item.dist_m != null && item.dist_m !== "" ? `${escapeHtml(String(item.dist_m))}\u043C` : "";
 
-      // ★ title + distance: СИБЛИНГИ (distance не внутри tooltip с opacity:0)
       const tooltipHtml = `<span class="pano-poi-tooltip">${titleHtml}</span><span class="pano-poi-distance-always">${distM}</span>`;
 
       if (iconUrl) {
@@ -237,19 +266,16 @@
     startPoiOverlayLoop();
   }
 
-  /**
-   * ★ ТОЧНАЯ КОПИЯ из оригинального repo.
-   * Работает и с viewViewer (Pannellum), и с aeroRen (3D).
-   */
   function updatePoiOverlay() {
     if (!poiOverlay) return;
 
-    // ★ Источник yaw/hfov/pitch: Pannellum ИЛИ 3D
     let yawDeg, hfovDeg, pitchDeg;
-    if (currentViewMode === "3d" && aeroRen) {
+    let use3D = false;
+    if (currentViewMode === "3d" && aeroRen && aeroRen.cam) {
       yawDeg = _normalizeAngle(aeroRen.getYaw());
       hfovDeg = aeroRen.getHfov();
       pitchDeg = aeroRen.getPitch();
+      use3D = true;
     } else if (viewViewer) {
       yawDeg = _normalizeAngle(viewViewer.getYaw());
       hfovDeg = viewViewer.getHfov();
@@ -265,32 +291,81 @@
 
     const hfov = _toRadians(hfovDeg);
     const vfov = 2 * Math.atan(Math.tan(hfov / 2) * (height / width));
-    const pitch = _toRadians(pitchDeg);
     const tanHalfV = Math.tan(vfov / 2);
-    const margin = 12;
+    const margin = 20;
 
+    if (use3D) {
+      const T = window.THREE;
+      if (!T || !aeroRen.cam) return;
+      const cam = aeroRen.cam;
+      // Обновим матрицы на всякий случай
+      try { cam.updateMatrixWorld(); cam.updateProjectionMatrix(); } catch(e){}
+      const camPos = cam.position.clone();
+      const camDir = new T.Vector3();
+      try { cam.getWorldDirection(camDir); } catch(e){ camDir.set(0,0,-1); }
+
+      Array.from(poiOverlay.children).forEach((marker) => {
+        const index = Number(marker.dataset.index);
+        const item = currentPoiItems[index];
+        if (!item) { marker.style.display = "none"; return; }
+        if (item.worldX == null || item.worldZ == null) { marker.style.display = "none"; return; }
+
+        const target = new T.Vector3(item.worldX, item.targetHeight!=null?item.targetHeight:5, item.worldZ);
+        const toPoint = new T.Vector3().subVectors(target, camPos);
+        const dot = toPoint.dot(camDir);
+        if (dot <= 0.5) { marker.style.display = "none"; return; } // позади камеры или слишком сбоку
+
+        const ndc = target.clone().project(cam);
+        if (ndc.z > 1 || ndc.z < -1) { marker.style.display="none"; return; }
+        if (Math.abs(ndc.x) > 1.2 || Math.abs(ndc.y) > 1.2) { marker.style.display="none"; return; }
+
+        const x = (ndc.x * 0.5 + 0.5) * width;
+        const y = (-ndc.y * 0.5 + 0.5) * height;
+
+        if (y <= margin || y >= height - margin || x <= margin || x >= width - margin) {
+          // если сильно за экраном - скрываем, иначе оставляем (чтобы не мигало на краю)
+          if (Math.abs(ndc.x) > 0.98 || Math.abs(ndc.y) > 0.98) { marker.style.display="none"; return; }
+        }
+
+        marker.style.display = "block";
+        marker.style.left = `${x}px`;
+        marker.style.top = `${y}px`;
+        marker.style.transform = marker.classList.contains("pano-poi-marker--icon") ? "translate(-50%, -100%)" : "translateX(-50%)";
+        // Масштаб по дистанции - далекие чуть меньше
+        const dist = camPos.distanceTo(target);
+        const scale = Math.max(0.7, Math.min(1.1, 250 / Math.max(20, dist)));
+        marker.style.opacity = dot < 20 ? "0.9" : "1";
+        // Не трогаем transform scale чтобы не ломать translate, добавим фильтр
+        marker.style.setProperty('--poi-scale', scale);
+      });
+      return;
+    }
+
+    // ── Панорамный режим: привязка к реальному углу вниз ──
     Array.from(poiOverlay.children).forEach((marker) => {
       const index = Number(marker.dataset.index);
       const item = currentPoiItems[index];
       if (!item || item.bearing == null) { marker.style.display = "none"; return; }
 
       let diff = item.bearing - yawDeg;
-      // JS % is broken for negatives: -178%360=-178 (should be 182)
       diff = diff - 360 * Math.round(diff / 360);
-      if (Math.abs(diff) > hfovDeg / 2) { marker.style.display = "none"; return; }
+      if (Math.abs(diff) > hfovDeg / 2 + 8) { marker.style.display = "none"; return; }
       const x = width / 2 + (diff / hfovDeg) * width;
 
-      const angleFromCenter = -pitch;
-      const ndcY = Math.tan(angleFromCenter) / tanHalfV;
-      if (Math.abs(ndcY) > 1) { marker.style.display = "none"; return; }
+      // Используем реальный pitch объекта если есть, иначе горизонт (0)
+      const itemPitch = (item.pitch != null && isFinite(item.pitch)) ? item.pitch : 0;
+      const diffPitch = itemPitch - pitchDeg;
+      // Если вертикально совсем мимо - скрыть
+      const diffPitchRad = _toRadians(diffPitch);
+      const ndcY = Math.tan(diffPitchRad) / tanHalfV;
+      if (Math.abs(ndcY) > 1.15) { marker.style.display = "none"; return; }
       const y = height / 2 - (ndcY * height) / 2;
-      if (y <= margin || y >= height - margin) { marker.style.display = "none"; return; }
+      if (y <= margin*0.5 || y >= height - margin*0.5) { marker.style.display = "none"; return; }
 
       marker.style.display = "block";
       marker.style.left = `${x}px`;
       marker.style.top = `${y}px`;
-      marker.style.transform = marker.classList.contains("pano-poi-marker--icon")
-        ? "translate(-50%, -100%)" : "translateX(-50%)";
+      marker.style.transform = marker.classList.contains("pano-poi-marker--icon") ? "translate(-50%, -100%)" : "translateX(-50%)";
     });
   }
 
@@ -305,6 +380,15 @@
       aeroRen.setYaw(angle, 700);
     } else if (viewViewer && typeof viewViewer.setYaw === "function") {
       viewViewer.setYaw(_normalizeAngle(angle), 700);
+      // В панораме еще попробуем наклонить к pitch цели
+      try {
+        const idx = currentPoiItems.findIndex(it=> Math.abs(_normalizeAngle(it.bearing)-_normalizeAngle(angle))<1);
+        if (idx>=0 && currentPoiItems[idx].pitch!=null && typeof viewViewer.setPitch==="function"){
+          const targetPitch = currentPoiItems[idx].pitch;
+          // мягкое приближение: не резко вниз, а чуть выше цели чтобы метка была в центре
+          viewViewer.setPitch(Math.max(-80, Math.min(30, targetPitch+5)), 400);
+        }
+      } catch(e){}
     }
   }
 
@@ -316,6 +400,13 @@
     const categories = (data.categories || []).filter((c) => (c.count || 0) > 0);
     if (!categories.length) { poiEl.innerHTML = `<p class="hint">В радиусе ${data.radius_m}м объектов не найдено</p>`; return; }
     poiEl.innerHTML = "";
+    // Определим базу для расчета bearing/pitch
+    const panoActive = (currentViewMode==="pano" && lastPanoMeta && lastPanoMeta.pano_lat!=null);
+    const baseLat = panoActive ? lastPanoMeta.pano_lat : (centerPoint?centerPoint.lat:null);
+    const baseLon = panoActive ? lastPanoMeta.pano_lon : (centerPoint?centerPoint.lon:null);
+    const panoH = (lastPanoMeta && lastPanoMeta.height!=null) ? lastPanoMeta.height : 150;
+    const originForWorld = lastOSMOrigin || centerPoint;
+
     categories.forEach((cat) => {
       const count = cat.count || 0; const items = cat.items || [];
       const wrapper = document.createElement("div"); wrapper.className = "poi-category";
@@ -326,9 +417,71 @@
       const list = document.createElement("div");
       if (!items.length) { const empty=document.createElement("p"); empty.className="hint"; empty.textContent=currentLang==="en"?"not found":"не найдено"; list.appendChild(empty); }
       else { items.forEach((it) => {
-        const title = it.title || "Объект"; const dist = it.dist_m != null ? it.dist_m : "";
-        const bearing = centerPoint && it.lat!=null && it.lon!=null ? computeBearing(centerPoint.lat,centerPoint.lon,it.lat,it.lon) : null;
-        currentPoiItems.push({category:cat.key,title,dist_m:dist,bearing,lat:it.lat,lon:it.lon});
+        const title = it.title || "Объект";
+        const dist = it.dist_m != null ? it.dist_m : "";
+
+        // ★ Попытка привязать к зданию из OSM
+        const nearest = findNearestBuilding(it.lat, it.lon, lastBuildings, 70);
+        let targetLat = it.lat, targetLon = it.lon;
+        let targetHeight = 2.5;
+        let worldX=null, worldZ=null;
+        let buildingForIcon = null;
+        if (nearest) {
+          targetLat = nearest.building._lat;
+          targetLon = nearest.building._lon;
+          targetHeight = (nearest.building.height||8) * 0.6; // середина фасада - метка прямо на объекте
+          buildingForIcon = nearest.building;
+          // мировые координаты - из ring если есть, иначе конвертация
+          const centroid = getBuildingCentroidLocal(nearest.building);
+          if (centroid) {
+            worldX = centroid.x;
+            worldZ = centroid.z;
+          } else if (originForWorld) {
+            const loc = latLonToLocal(originForWorld.lat, originForWorld.lon, targetLat, targetLon);
+            worldX = loc.x; worldZ = loc.z;
+          }
+        } else {
+          // нет здания - точка на земле под POI
+          if (originForWorld) {
+            const loc = latLonToLocal(originForWorld.lat, originForWorld.lon, it.lat, it.lon);
+            worldX = loc.x; worldZ = loc.z;
+          }
+          targetHeight = 2;
+        }
+
+        // bearing для оверлея: от базы (панорама или центр) к цели
+        let bearing = null;
+        let pitch = null;
+        let overlayDist = null;
+        if (baseLat!=null && baseLon!=null && targetLat!=null && targetLon!=null) {
+          bearing = computeBearing(baseLat, baseLon, targetLat, targetLon);
+          overlayDist = haversineM(baseLat, baseLon, targetLat, targetLon);
+          // pitch = -atan( (H_pano - H_target) / dist )
+          pitch = - Math.atan2(Math.max(1, panoH - targetHeight), Math.max(1, overlayDist)) * 180 / Math.PI;
+          // Для близких объектов сильно вниз, но ограничим -85..15 чтобы не уходило за край
+          pitch = Math.max(-85, Math.min(15, pitch));
+        } else if (centerPoint) {
+          bearing = computeBearing(centerPoint.lat, centerPoint.lon, targetLat, targetLon);
+        }
+
+        // Для 3D режима нам важен worldX/Z, для панорамы - bearing/pitch
+        currentPoiItems.push({
+          category:cat.key,
+          title,
+          dist_m:dist,
+          bearing,
+          pitch,
+          lat:targetLat,
+          lon:targetLon,
+          orig_lat:it.lat,
+          orig_lon:it.lon,
+          worldX,
+          worldZ,
+          targetHeight,
+          overlayDist,
+          building: buildingForIcon
+        });
+
         const titleHtml = it.org_url ? `<a href="${escapeHtml(it.org_url)}" target="_blank" rel="noreferrer">${escapeHtml(title)}</a>` : escapeHtml(title);
         const distSpan = document.createElement("span"); distSpan.className = "dist"; distSpan.textContent = `— ${dist}м`;
         if (bearing!=null) { distSpan.style.cursor="pointer"; distSpan.style.color="var(--accent)"; distSpan.addEventListener("click",()=>focusPoiYaw(bearing)); }
@@ -336,11 +489,10 @@
       }); }
       wrapper.appendChild(head); wrapper.appendChild(list); poiEl.appendChild(wrapper);
     });
-    // ★ Максимум 2 ближайших на категорию для overlay (чтобы не засорять)
     const overlayItems = [];
     const catCount = {};
     for (const item of currentPoiItems) {
-      if (item.bearing == null) continue;
+      if (item.bearing == null && item.worldX==null) continue;
       catCount[item.category] = (catCount[item.category] || 0) + 1;
       if (catCount[item.category] <= 2) overlayItems.push(item);
     }
@@ -354,17 +506,13 @@
     renderPoiSummary(data, currentViewPoint);
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // Панорама (Pannellum)
-  // ═══════════════════════════════════════════════════════════════
-
   let previewViewer = null;
   let viewViewer = null;
 
   function destroyAll() {
-    if (previewViewer) { previewViewer.destroy(); previewViewer=null; }
-    if (viewViewer) { viewViewer.destroy(); viewViewer=null; }
-    if (aeroRen) { aeroRen.destroy(); aeroRen=null; }
+    if (previewViewer) { try{ previewViewer.destroy(); }catch(e){} previewViewer=null; }
+    if (viewViewer) { try{ viewViewer.destroy(); }catch(e){} viewViewer=null; }
+    if (aeroRen) { try{ aeroRen.destroy(); }catch(e){} aeroRen=null; }
     currentPoiItems = []; destroyPoiOverlay();
   }
 
@@ -378,10 +526,22 @@
   }
 
   async function loadPanoramaInto(containerId,statusElId,lat,lon,options={}) {
-    destroyAll();
+    // Не трогаем lastPanoMeta если это превью добавки точки
+    const isMainView = containerId==="view-panorama";
+    if (isMainView) { /* оставим previous чтобы не мигать, перезапишем после */ }
+    else {
+      // для превью тоже чистим рендеры, но без влияния на глобалы POI
+      if (previewViewer) { try{ previewViewer.destroy(); }catch(e){} previewViewer=null; }
+      if (viewViewer) { try{ viewViewer.destroy(); }catch(e){} viewViewer=null; }
+      if (aeroRen) { try{ aeroRen.destroy(); }catch(e){} aeroRen=null; }
+      // не чистим currentPoiItems если превью
+    }
+    if (isMainView) destroyAll();
+
     const statusEl=document.getElementById(statusElId); const container=document.getElementById(containerId);
-    const loadingElId=options.loadingElId||null; const loadingEl=loadingElId?document.getElementById(loadingElId):null;
-    container.innerHTML=""; ensurePoiOverlay(container);
+    const loadingElId=options.loadingElId||options.ld||null; const loadingEl=loadingElId?document.getElementById(loadingElId):null;
+    if (container) { container.innerHTML=""; }
+    ensurePoiOverlay(container);
     if(loadingEl)loadingEl.classList.remove("hidden");
     statusEl.textContent=currentLang==="en"?"Searching for panorama nearby…":"Ищем панораму рядом с точкой…"; statusEl.classList.remove("hidden");
     const params=new URLSearchParams({lat:String(lat),lon:String(lon)}); if(options.force)params.set("force","1");
@@ -389,6 +549,17 @@
     if(data.status==="not_found"){statusEl.textContent="Рядом панорама не найдена.";if(loadingEl)loadingEl.classList.add("hidden");return null;}
     if(data.status==="error"){statusEl.textContent="Ошибка: "+(data.message||"");if(loadingEl)loadingEl.classList.add("hidden");return null;}
     statusEl.classList.add("hidden");if(loadingEl)loadingEl.classList.add("hidden");
+
+    if (isMainView) {
+      lastPanoMeta = {
+        pano_lat: data.pano_lat!=null?data.pano_lat:lat,
+        pano_lon: data.pano_lon!=null?data.pano_lon:lon,
+        height: data.height!=null?data.height:150,
+        url: data.url,
+        name: data.name
+      };
+    }
+
     let viewer; try{viewer=pannellum.viewer(containerId,{type:"equirectangular",panorama:data.url,autoLoad:true,showControls:true,compass:false,autoRotate:false,useCanvas:true,hotSpots:[]});ensurePoiOverlay(container);}
     catch(err){console.warn("Pannellum failed",err);return showPanoramaFallback(containerId,data.url,statusEl,loadingEl);}
     const canvas=container.querySelector("canvas"); if(canvas)canvas.addEventListener("webglcontextlost",(e)=>{e.preventDefault();destroyAll();showPanoramaFallback(containerId,data.url,statusEl,loadingEl);});
@@ -396,18 +567,23 @@
     return {viewer,data};
   }
 
-  // ★ Переключение 3D ↔ Panorama
   async function switchTo(mode,lat,lon) {
     currentViewMode=mode;
     const b3=document.getElementById("btn-view-3d"),bp=document.getElementById("btn-view-pano");
     if(b3)b3.classList.toggle("active",mode==="3d");if(bp)bp.classList.toggle("active",mode==="pano");
-    destroyAll();
     const ct=document.getElementById("view-panorama"),ld=document.getElementById("view-panorama-loading"),st=document.getElementById("view-panorama-status");
-    if(ct)ct.innerHTML="";
+    if(mode!=="pano"){
+      // при переходе в 3D чистим панораму, но оставляем lastBuildings
+      if (viewViewer) { try{ viewViewer.destroy(); }catch(e){} viewViewer=null; }
+      if (aeroRen) { try{ aeroRen.destroy(); }catch(e){} aeroRen=null; }
+      currentPoiItems = []; destroyPoiOverlay();
+    } else {
+      // панорама: полную очистку сделает loadPanoramaInto
+    }
+    if(ct && mode==="3d")ct.innerHTML="";
 
     if(mode==="3d") {
       if(ld)ld.classList.remove("hidden");if(st){st.textContent=LANG[currentLang].loading3d;st.classList.remove("hidden");}
-      // Загружаем данные, находим ближайшее здание, ставим камеру НАД ним
       const radius=300; let buildData;
       try{const res=await fetch("/api/osm-buildings?lat="+encodeURIComponent(lat)+"&lon="+encodeURIComponent(lon)+"&radius_m="+radius);buildData=await res.json();if(buildData.status==="error")throw new Error(buildData.message);}
       catch(e){if(st){st.textContent="Ошибка: "+e.message;st.classList.remove("hidden");}if(ld)ld.classList.add("hidden");return;}
@@ -419,7 +595,11 @@
         camX=cx/ring.length; camZ=cy/ring.length;
       }
 
-      const el=document.getElementById("view-panorama"); el.innerHTML="";
+      // сохраняем для привязки POI к зданиям
+      lastBuildings = buildData.buildings || [];
+      lastOSMOrigin = {lat:lat, lon:lon};
+
+      const el=document.getElementById("view-panorama"); if(el) el.innerHTML="";
       const ar=new window.AeroRenderer(el,{bg:0x87CEEB,ground:0x73787b,fov:75});
       if(!ar.init()){if(st){st.textContent="WebGL не поддерживается";st.classList.remove("hidden");}if(ld)ld.classList.add("hidden");return;}
       ar.load(buildData,camX,camZ); ar.start(); aeroRen=ar;
@@ -428,7 +608,6 @@
       startPoiOverlayLoop();
       loadPoiSummaryForLatLon(lat,lon);
 
-      // ★ Обработка кликов по зданиям (планы этажей)
       ar.onBuildingClick=function(bData){
         if(isAdmin){showPlanAdmin(bData);}
         else if(bData.plan){showPlanViewer(bData.plan);}
@@ -436,12 +615,17 @@
 
     } else {
       if(ld)ld.classList.remove("hidden");
-      const res=await loadPanoramaInto("view-panorama","view-panorama-status",lat,lon,{ld:"view-panorama-loading"});
-      if(res)viewViewer=res.viewer;
+      const res=await loadPanoramaInto("view-panorama","view-panorama-status",lat,lon,{loadingElId:"view-panorama-loading"});
+      if(res){
+        viewViewer=res.viewer;
+        ensurePoiOverlay(ct);
+        startPoiOverlayLoop();
+        // ★ теперь подгружаем POI и для панорамы - они будут с pitch на объект
+        loadPoiSummaryForLatLon(lat,lon);
+      }
     }
   }
 
-  // ── Открытие модалки ──
   let currentViewPoint = null;
 
   function openAt(lat,lon,title,desc,pid) {
@@ -452,7 +636,6 @@
     if(ct)ct.innerHTML="";if(ld)ld.classList.remove("hidden");if(st){st.textContent="";st.classList.remove("hidden");}
     showModal("view-point-modal");
     const tg=document.getElementById("aero-view-toggle");if(tg)tg.style.display="flex";
-    // ★ switchTo сам внутри загрузит POI после 3D
     switchTo("3d",lat,lon);
   }
 
@@ -462,7 +645,6 @@
     openAt(panoPoint.lat,panoPoint.lon,panoPoint.title||"Воздушная панорама",panoPoint.description||"");
   }
 
-  // ★ Toggle buttons
   const b3d=document.getElementById("btn-view-3d"),bpo=document.getElementById("btn-view-pano");
   if(b3d)b3d.addEventListener("click",()=>{if(currentViewPoint)switchTo("3d",currentViewPoint.lat,currentViewPoint.lon);});
   if(bpo)bpo.addEventListener("click",()=>{if(currentViewPoint)switchTo("pano",currentViewPoint.lat,currentViewPoint.lon);});
@@ -471,12 +653,11 @@
 
   const reloadBtn=document.getElementById("view-point-reload");
   if(reloadBtn)reloadBtn.addEventListener("click",async()=>{if(!currentViewPoint||currentViewPoint.lat==null)return;
-    switchTo(currentViewMode,currentViewPoint.lat,currentViewPoint.lon);loadPoiSummaryForLatLon(currentViewPoint.lat,currentViewPoint.lon);});
+    switchTo(currentViewMode,currentViewPoint.lat,currentViewPoint.lon);});
 
   const deleteBtn=document.getElementById("view-point-delete");
   if(deleteBtn)deleteBtn.addEventListener("click",async()=>{if(!currentViewPoint)return;if(!confirm(`Удалить точку "${currentViewPoint.title}"?`))return;await fetch(`/api/points/${currentViewPoint.id}`,{method:"DELETE"});hideModal("view-point-modal");destroyAll();loadPoints();});
 
-  // ── Админ ──
   const loginBtn=document.getElementById("btn-login");
   if(loginBtn)loginBtn.addEventListener("click",()=>{document.getElementById("login-error").classList.add("hidden");document.getElementById("login-password").value="";showModal("login-modal");});
   const loginSubmit=document.getElementById("login-submit");
@@ -484,7 +665,6 @@
   const logoutBtn=document.getElementById("btn-logout");
   if(logoutBtn)logoutBtn.addEventListener("click",async()=>{await fetch("/api/logout",{method:"POST"});location.reload();});
 
-  // ── Добавление точки ──
   const addModeBtn=document.getElementById("btn-add-mode");
   if(addModeBtn){const t=LANG[currentLang];if(!addModeActive)addModeBtn.textContent=t.btnAddPoint;
     addModeBtn.addEventListener("click",()=>{addModeActive=!addModeActive;addModeBtn.classList.toggle("active",addModeActive);addModeBtn.textContent=addModeActive?"Кликните по карте…":"Добавить точку";});}
@@ -500,7 +680,6 @@
   if(addPointSubmit)addPointSubmit.addEventListener("click",async()=>{if(!pendingCoords)return;const title=document.getElementById("add-point-title").value.trim();const description=document.getElementById("add-point-description").value.trim();
     await fetch("/api/points",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({lat:pendingCoords.lat,lon:pendingCoords.lon,title,description})});hideModal("add-point-modal");destroyAll();pendingCoords=null;loadPoints();});
 
-  // ═══ ПЛАНЫ ЭТАЖЕЙ ═══
   function showPlanAdmin(bData){
     var info=document.getElementById("plan-info");
     var uploadBtn=document.getElementById("plan-upload-btn");
