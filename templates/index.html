@@ -26,6 +26,15 @@
 
 <div id="app" data-is-admin="{{ 'true' if is_admin else 'false' }}" data-map-center="{{ '57.1509,65.5273' }}">
 
+  <!-- Поиск -->
+  <div style="position:fixed;top:56px;left:12px;z-index:1000;width:320px">
+    <div style="position:relative">
+      <input type="text" id="search-input" placeholder="Поиск улиц, мест…" style="width:100%;padding:10px 12px 10px 36px;background:rgba(22,27,34,0.95);border:1px solid #2a2f3a;border-radius:8px;color:#e7e9ee;font-size:14px;backdrop-filter:blur(8px);outline:none" autocomplete="off"/>
+      <svg style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none" width="16" height="16" fill="#9aa1ae" viewBox="0 0 16 16"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/></svg>
+    </div>
+    <div id="search-results" style="display:none;background:rgba(22,27,34,0.95);border:1px solid #2a2f3a;border-radius:0 0 8px 8px;max-height:300px;overflow-y:auto;backdrop-filter:blur(8px)"></div>
+  </div>
+
   <header class="topbar">
       <h1 id="app-title" data-i18n="appTitle">Точки с панорамами</h1>
     <div class="admin-controls">
@@ -142,5 +151,5 @@
 <script src="{{ url_for('static', filename='js/OrbitControls.js') }}"></script>
 <script src="{{ url_for('static', filename='js/aero3d.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map.js') }}"></script>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a196006919ab973c',t:'MTc4Mzc1Mzk2NA=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>

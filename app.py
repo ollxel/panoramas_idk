@@ -25,6 +25,7 @@ from math import asin, cos, radians, sin, sqrt
 from flask import Flask, g, jsonify, render_template, request, send_from_directory, session
 
 from osm_buildings import osm_bp
+from poi_parser import fetch_poi_from_osm
 from pano_downloader import (
     DEFAULT_TILE_LIMIT,
     PanoramaLayerError,
@@ -362,20 +363,43 @@ def poi_summary():
         radius_m = 100.0
 
     categories_out = []
+    # ★ Данные из парсера OSM (дополняют CSV)
+    try:
+        parser_data = fetch_poi_from_osm(target_lat, target_lon, radius_m)
+    except:
+        parser_data = {}
+
     for key, cat_name in POI_CATEGORIES.items():
         items = []
+        seen_coords = set()
+
+        # 1. Из CSV (существующие данные)
         for poi in _poi_by_category.get(key, []):
             dist_m = _haversine_m(target_lat, target_lon, poi["lat"], poi["lon"])
             if dist_m <= radius_m:
-                items.append(
-                    {
-                        "title": poi["title"],
-                        "dist_m": round(dist_m, 1),
-                        "org_url": poi.get("org_url") or "",
-                        "lat": poi["lat"],
-                        "lon": poi["lon"],
-                    }
-                )
+                items.append({
+                    "title": poi["title"],
+                    "dist_m": round(dist_m, 1),
+                    "org_url": poi.get("org_url") or "",
+                    "lat": poi["lat"],
+                    "lon": poi["lon"],
+                })
+                seen_coords.add((round(poi["lat"], 4), round(poi["lon"], 4)))
+
+        # 2. Из парсера OSM (дополняем то, чего нет в CSV)
+        for poi in parser_data.get(key, []):
+            coord_key = (round(poi["lat"], 4), round(poi["lon"], 4))
+            if coord_key in seen_coords:
+                continue
+            seen_coords.add(coord_key)
+            items.append({
+                "title": poi["title"],
+                "dist_m": poi["dist_m"],
+                "org_url": poi.get("org_url") or "",
+                "lat": poi["lat"],
+                "lon": poi["lon"],
+            })
+
         items.sort(key=lambda x: x["dist_m"])
         categories_out.append(
             {"key": key, "name": cat_name, "count": len(items), "items": items}

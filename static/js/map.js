@@ -100,6 +100,44 @@
   loadPoints(); loadAirPanoMarkers();
   map.on("moveend",debounce(()=>loadAirPanoMarkers(),500));
 
+  // ★ ПОИСК (Nominatim / OSM)
+  var searchInput=document.getElementById("search-input");
+  var searchResults=document.getElementById("search-results");
+  var searchMarker=null;
+  if(searchInput){
+    var searchTimer=null;
+    searchInput.addEventListener("input",function(){
+      clearTimeout(searchTimer);
+      var q=searchInput.value.trim();
+      if(q.length<2){searchResults.style.display="none";return;}
+      searchTimer=setTimeout(async function(){
+        var center=map.getCenter();
+        try{
+          var r=await fetch("/api/search?q="+encodeURIComponent(q)+"&lat="+center.lat+"&lon="+center.lng+"&limit=5");
+          var d=await r.json();
+          if(!d.results||!d.results.length){searchResults.style.display="none";return;}
+          searchResults.innerHTML="";
+          d.results.forEach(function(item){
+            var div=document.createElement("div");
+            div.style.cssText="padding:8px 12px;cursor:pointer;color:#e7e9ee;font-size:13px;border-bottom:1px solid #2a2f3a";
+            div.textContent=item.name.length>60?item.name.substring(0,60)+"…":item.name;
+            div.addEventListener("click",function(){
+              map.setView([item.lat,item.lon],16);
+              if(searchMarker)map.removeLayer(searchMarker);
+              searchMarker=L.marker([item.lat,item.lon]).addTo(map).bindPopup("<b>"+escapeHtml(item.name)+"</b>").openPopup();
+              searchResults.style.display="none";searchInput.value=item.name;
+            });
+            div.addEventListener("mouseenter",function(){div.style.background="rgba(77,141,255,0.15)";});
+            div.addEventListener("mouseleave",function(){div.style.background="transparent";});
+            searchResults.appendChild(div);
+          });
+          searchResults.style.display="block";
+        }catch(e){}
+      },400);
+    });
+    document.addEventListener("click",function(e){if(!e.target.closest("#search-input")&&!e.target.closest("#search-results"))searchResults.style.display="none";});
+  }
+
   // ★ КЛИК ПО КАРТЕ → 3D
   map.on("click",function(e){if(addModeActive)return;openAt(e.latlng.lat,e.latlng.lng,"Точка "+e.latlng.lat.toFixed(5)+", "+e.latlng.lng.toFixed(5),"");});
 
@@ -371,18 +409,17 @@
       try{const res=await fetch("/api/osm-buildings?lat="+encodeURIComponent(lat)+"&lon="+encodeURIComponent(lon)+"&radius_m="+radius);buildData=await res.json();if(buildData.status==="error")throw new Error(buildData.message);}
       catch(e){if(st){st.textContent="Ошибка: "+e.message;st.classList.remove("hidden");}if(ld)ld.classList.add("hidden");return;}
 
-      let camX=0,camZ=0,camHeight=80;
+      let camX=0,camZ=0;
       if(buildData.buildings&&buildData.buildings.length>0){
         const nearest=buildData.buildings[0]; const ring=nearest.ring;
         let cx=0,cy=0; for(let i=0;i<ring.length;i++){cx+=ring[i][0];cy+=ring[i][1];}
         camX=cx/ring.length; camZ=cy/ring.length;
-        camHeight=Math.max(50,nearest.height+30);
       }
 
       const el=document.getElementById("view-panorama"); el.innerHTML="";
       const ar=new window.AeroRenderer(el,{bg:0x87CEEB,ground:0x5a7247,fov:75});
       if(!ar.init()){if(st){st.textContent="WebGL не поддерживается";st.classList.remove("hidden");}if(ld)ld.classList.add("hidden");return;}
-      ar.load(buildData,camX,camZ,camHeight); ar.start(); aeroRen=ar;
+      ar.load(buildData,camX,camZ); ar.start(); aeroRen=ar;
       if(ld)ld.classList.add("hidden");if(st)st.classList.add("hidden");
       ensurePoiOverlay(ct);
       startPoiOverlayLoop();

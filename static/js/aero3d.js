@@ -17,6 +17,7 @@ class AeroRenderer{
     this._resize=this._resize.bind(this); this._frame=this._frame.bind(this);
     // Plans + building click
     this._buildings=[];
+    this._buildingMeshes=[];
     this._plans=[];
     this._raycaster=null;
     this._mouse=new THREE.Vector2();
@@ -89,13 +90,35 @@ class AeroRenderer{
     }
   }
 
+  _estimateCameraHeight(camX, camZ){
+    if(!this.cam||!this.group||!this._buildingMeshes.length)return 80;
+    this.cam.position.set(camX, 80, camZ);
+    var yawRad=this.yaw*Math.PI/180,pitchRad=this.pitch*Math.PI/180;
+    var lookDir=new this.T.Vector3(Math.sin(yawRad)*Math.cos(pitchRad),Math.sin(pitchRad),-Math.cos(yawRad)*Math.cos(pitchRad));
+    this.cam.lookAt(camX + lookDir.x * 1200, 20 + lookDir.y * 400, camZ + lookDir.z * 1200);
+    this.cam.updateMatrixWorld(true);
+    this.group.updateMatrixWorld(true);
+    var frustum=new this.T.Frustum();
+    var projScreenMatrix=new this.T.Matrix4();
+    projScreenMatrix.multiplyMatrices(this.cam.projectionMatrix,this.cam.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(projScreenMatrix);
+    var highest=0;
+    for(var i=0;i<this._buildingMeshes.length;i++){
+      var mesh=this._buildingMeshes[i];
+      if(!mesh)continue;
+      var box=new this.T.Box3().setFromObject(mesh);
+      if(frustum.intersectsBox(box)) highest=Math.max(highest, this._buildings[i]&&this._buildings[i].height?this._buildings[i].height:0);
+    }
+    if(highest<=0) return 80;
+    return Math.max(40, highest + 25 + Math.max(10, highest * 0.2));
+  }
+
   load(data, camX, camZ, camY){
     var T=this.T, blds=data.buildings||[], rds=data.roads||[], trs=data.trees||[], wtrs=data.waters||[], r=data.radius_m||500;
-    camX=camX||0; camZ=camZ||0; camY=camY||80;
-    this._camPos={x:camX,y:camY,z:camZ};
+    camX=camX||0; camZ=camZ||0;
     this._buildings=blds;
+    this._buildingMeshes=[];
     this._plans=data.plans||[];
-    this.cam.position.set(camX, camY, camZ);
 
     // Земля
     if(this.ground){this.scene.remove(this.ground);this.ground.geometry.dispose();this.ground.material.dispose();}
@@ -163,10 +186,17 @@ class AeroRenderer{
 
         var g=new T.Group();g.add(w);g.add(rf);
         g.userData={buildingIndex:i}; // ★ для raycasting
-        this.group.add(g);cnt++;
+        this.group.add(g);this._buildingMeshes.push(g);cnt++;
       }catch(e){}
     }
     this.scene.add(this.group);
+
+    var autoCamY = (typeof camY === "number" && isFinite(camY)) ? camY : null;
+    if(autoCamY == null){
+      autoCamY=this._estimateCameraHeight(camX, camZ);
+    }
+    this._camPos={x:camX,y:autoCamY,z:camZ};
+    this.cam.position.set(camX, autoCamY, camZ);
 
     // Деревья
     if(this.treeGroup){this.scene.remove(this.treeGroup);this.treeGroup.traverse(function(c){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();});}
@@ -188,7 +218,6 @@ class AeroRenderer{
   start(){this._frame();}
   _frame(){
     if(this.dead)return;this.raf=requestAnimationFrame(this._frame);
-    if(!this._dragging)this.yaw+=0.02;
     var yawRad=this.yaw*Math.PI/180,pitchRad=this.pitch*Math.PI/180;
     var lookDir=new this.T.Vector3(Math.sin(yawRad)*Math.cos(pitchRad),Math.sin(pitchRad),-Math.cos(yawRad)*Math.cos(pitchRad));
     var p=this._camPos;

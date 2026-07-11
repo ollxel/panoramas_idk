@@ -1,7 +1,7 @@
 """
 osm_buildings.py — OSM здания + дороги + деревья + водоёмы + планы + Flask endpoint
 """
-import math, os, time, uuid, requests
+import math, os, random, time, uuid, requests
 from flask import Blueprint, jsonify, request, send_from_directory
 
 osm_bp = Blueprint("osm_buildings", __name__)
@@ -64,6 +64,46 @@ def _pt_in_poly(px, py, poly):
         j = i
     return inside
 
+def _pt_seg_dist(px, py, ax, ay, bx, by):
+    """Расстояние от точки до отрезка."""
+    dx = bx - ax; dy = by - ay
+    if dx == 0 and dy == 0:
+        return math.sqrt((px-ax)**2 + (py-ay)**2)
+    t = max(0, min(1, ((px-ax)*dx + (py-ay)*dy) / (dx*dx + dy*dy)))
+    return math.sqrt((px - ax - t*dx)**2 + (py - ay - t*dy)**2)
+
+
+def _polygon_area(poly):
+    if len(poly) < 3:
+        return 0.0
+    area = 0.0
+    for i in range(len(poly)):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % len(poly)]
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0
+
+
+def _tree_too_close_to_buildings(cx, cy, building_rings, crown_radius=4.0):
+    clearance = max(2.0, crown_radius + 1.5)
+    for ring in building_rings or []:
+        if len(ring) < 3:
+            continue
+        xs = [p[0] for p in ring]
+        ys = [p[1] for p in ring]
+        min_x, max_x = min(xs) - clearance, max(xs) + clearance
+        min_y, max_y = min(ys) - clearance, max(ys) + clearance
+        if cx < min_x or cx > max_x or cy < min_y or cy > max_y:
+            continue
+        if _pt_in_poly(cx, cy, ring):
+            return True
+        n = len(ring)
+        for i in range(n):
+            if _pt_seg_dist(cx, cy, ring[i][0], ring[i][1], ring[(i + 1) % n][0], ring[(i + 1) % n][1]) < clearance:
+                return True
+    return False
+
+
 def _is_green(tags):
     if tags.get("landuse") in ("forest","grass","meadow","village_green","recreation_ground"):
         return True
@@ -80,56 +120,72 @@ def _is_water(tags):
     if tags.get("waterway") == "riverbank": return True
     return False
 
-def _make_trees_in_parks(park_polys):
+def _make_trees_in_parks(park_polys, building_rings=None):
     """
-    Grid-based деревья с зазорами. Плотность зависит от размера парка.
-    Маленькие скверы → плотно. Большие парки → с зазорами но покрывают всю территорию.
+    Генерация деревьев по площади зелёной зоны с более мягкой плотностью.
+    Деревья не попадают внутрь зданий и держат безопасный зазор по кронам.
     """
-    import random
     trees = []
-    GLOBAL_MAX = 2000
+    GLOBAL_MAX = 3000
+    existing = set()
 
     for idx, poly in enumerate(park_polys):
-        if len(poly) < 3: continue
-        xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+        if len(poly) < 3:
+            continue
+        xs = [p[0] for p in poly]
+        ys = [p[1] for p in poly]
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
-        w = max_x - min_x; h = max_y - min_y
-        if w < 2.0 or h < 2.0: continue
+        w = max_x - min_x
+        h = max_y - min_y
+        if w < 2.0 or h < 2.0:
+            continue
 
-        area = w * h
-        # Плотность: sqrt(area) * коэф — даёт больше деревьев на больших площадях
-        # но не линейно, а с убывающей плотностью
-        gap = max(3.0, min(8.0, math.sqrt(area) * 0.1))  # зазор 3-8м в зависимости от размера
-        target = max(5, int(area / (gap * gap * 1.5)))  # ~45% покрытие решёткой
-        target = min(target, 500)
+        area_m2 = _polygon_area(poly)
+        if area_m2 < 400:
+            continue
 
-        rng = random.Random(idx * 997 + 13)
-        placed = []
+        if area_m2 < 1800:
+            target_count = 2
+        elif area_m2 < 6000:
+            target_count = 4
+        elif area_m2 < 18000:
+            target_count = 8
+        else:
+            target_count = min(30, 10 + int(area_m2 / 12000))
 
-        # Grid-based placement: равномерно по bounding box, потом проверяем in_poly + зазор
-        cols = max(1, int(w / gap))
-        rows = max(1, int(h / gap))
+        spacing = max(8.0, min(18.0, math.sqrt(max(area_m2, 1) / max(target_count, 1)) * 0.6))
+        cols = max(2, int(math.ceil(w / spacing)) + 1)
+        rows = max(2, int(math.ceil(h / spacing)) + 1)
         cell_w = w / cols
         cell_h = h / rows
+        rng = random.Random(idx * 997 + 13)
 
+        candidates = []
         for row in range(rows):
             for col in range(cols):
-                if len(placed) >= target or len(trees) >= GLOBAL_MAX:
-                    break
-                # Центр ячейки + случайный сдвиг внутри ячейки
-                cx = min_x + (col + 0.5) * cell_w + rng.uniform(-cell_w * 0.35, cell_w * 0.35)
-                cy = min_y + (row + 0.5) * cell_h + rng.uniform(-cell_h * 0.35, cell_h * 0.35)
+                cx = min_x + (col + 0.5) * cell_w + rng.uniform(-cell_w * 0.25, cell_w * 0.25)
+                cy = min_y + (row + 0.5) * cell_h + rng.uniform(-cell_h * 0.25, cell_h * 0.25)
                 if not _pt_in_poly(cx, cy, poly):
                     continue
-                # Проверяем зазор
-                ok = True
-                for px, py in placed:
-                    if (cx - px) ** 2 + (cy - py) ** 2 < gap * gap * 0.8:
-                        ok = False; break
-                if ok:
-                    placed.append((cx, cy))
-                    trees.append({"x": round(cx, 1), "y": round(cy, 1)})
+                candidates.append((cx, cy))
+
+        rng.shuffle(candidates)
+        for cx, cy in candidates:
+            if len(trees) >= GLOBAL_MAX or len(trees) >= target_count:
+                break
+            crown_radius = 3.5 + rng.uniform(0.0, 2.0)
+            if _tree_too_close_to_buildings(cx, cy, building_rings, crown_radius):
+                continue
+            gx, gy = round(cx, 0), round(cy, 0)
+            ok = True
+            for ex, ey in existing:
+                if abs(gx - ex) <= 4 and abs(gy - ey) <= 4:
+                    ok = False
+                    break
+            if ok:
+                existing.add((gx, gy))
+                trees.append({'x': round(cx, 1), 'y': round(cy, 1)})
 
     return trees
 
@@ -208,7 +264,7 @@ def _query(lat, lon, radius_m, timeout=45):
     if not data:
         raise RuntimeError("Overpass unavailable: " + "; ".join(errors[-2:]))
 
-    buildings, roads, trees, park_polys, waters = [], [], [], [], []
+    buildings, roads, trees, park_polys, waters, building_rings = [], [], [], [], [], []
 
     for el in data.get("elements", []):
         if el.get("type") == "node":
@@ -234,6 +290,7 @@ def _query(lat, lon, radius_m, timeout=45):
             if len(ring) < 3: continue
             cx = sum(p[0] for p in ring) / len(ring)
             cy = sum(p[1] for p in ring) / len(ring)
+            building_rings.append(ring)
             buildings.append({
                 "ring": ring, "height": round(_height(tags, btype), 1),
                 "color": COLORS.get(btype, COLORS["default"]),
@@ -252,8 +309,16 @@ def _query(lat, lon, radius_m, timeout=45):
         if _is_water(tags):
             waters.append(ring)
 
-    if not trees and park_polys:
-        trees = _make_trees_in_parks(park_polys)
+    if building_rings:
+        trees = [t for t in trees if not _tree_too_close_to_buildings(t['x'], t['y'], building_rings, 4.0)]
+
+    if park_polys:
+        osm_positions = set((round(t['x'],0), round(t['y'],0)) for t in trees)
+        procedural = _make_trees_in_parks(park_polys, building_rings)
+        for t in procedural:
+            key = (round(t['x'],0), round(t['y'],0))
+            if key not in osm_positions:
+                trees.append(t)
 
     buildings.sort(key=lambda b: b["dist_m"])
 
@@ -290,6 +355,33 @@ def get_buildings():
         except Exception as e: return jsonify({"status": "error", "message": str(e)}), 502
         if len(_cache) > 500: _cache.pop(next(iter(_cache)))
     return jsonify({"status": "ok", **_cache[key]})
+
+# ═══ ПОИСК (Nominatim / OSM) ═══
+
+@osm_bp.route("/api/search")
+def search_places():
+    q = request.args.get("q", "").strip()
+    if not q or len(q) < 2:
+        return jsonify({"results": []})
+    lat = request.args.get("lat")
+    lon = request.args.get("lon")
+    limit = min(int(request.args.get("limit", 5)), 10)
+    params = {"q": q, "format": "json", "limit": limit, "addressdetails": 1, "accept-language": "ru"}
+    if lat and lon:
+        try:
+            params["viewbox"] = f"{float(lon)-0.5},{float(lat)+0.3},{float(lon)+0.5},{float(lat)-0.3}"
+            params["bounded"] = 0
+        except: pass
+    try:
+        r = requests.get("https://nominatim.openstreetmap.org/search",
+                         params=params, headers={"User-Agent": "panoramas_idk/1.0"}, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+    except:
+        return jsonify({"results": []})
+    results = [{"name": i.get("display_name",""), "lat": float(i.get("lat",0)),
+                "lon": float(i.get("lon",0)), "type": i.get("type","")} for i in data]
+    return jsonify({"results": results})
 
 @osm_bp.route("/api/plans", methods=["GET"])
 def list_plans():
@@ -334,3 +426,8 @@ def delete_plan():
 def serve_plan(filename):
     """Отдаёт файл плана."""
     return send_from_directory(PLANS_DIR, filename)
+
+
+
+
+
